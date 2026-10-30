@@ -86,18 +86,12 @@ namespace Cooopy.Models
     {
         public string HotkeyMain { get; set; } = "Ctrl+Alt+C";
         public string HotkeySave { get; set; } = "Ctrl+Alt+S";
-        public bool HotkeyMainEnabled { get; set; } = true;
-        public bool HotkeySaveEnabled { get; set; } = true;
         public bool AutoCapture { get; set; } = true;
         public int MaxLength { get; set; } = 20000;
         public int DedupeMinutes { get; set; } = 1440;
         public long PauseUntil { get; set; }
         public bool CloseToTray { get; set; } = true;
         public bool StartMinimized { get; set; } = false;
-        public bool ContextMenuEnabled { get; set; } = true;
-        public string ContextModifier { get; set; } = "Shift";
-        public bool AutoCopySelection { get; set; } = true;
-        public bool RestoreClipboard { get; set; } = true;
         public string SortMode { get; set; } = "time_desc";
         public bool HideUntagged { get; set; }
         public bool QuickTagAutoSave { get; set; } = true;

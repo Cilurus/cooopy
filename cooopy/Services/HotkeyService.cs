@@ -13,17 +13,6 @@ namespace Cooopy.Services
 
         public void Attach(IntPtr hwnd) => _hwnd = hwnd;
 
-        /// <summary>Unregisters a currently active hotkey without touching others.</summary>
-        public void Disable(int id)
-        {
-            if (_hwnd == IntPtr.Zero) return;
-            if (_active.ContainsKey(id))
-            {
-                Native.UnregisterHotKey(_hwnd, id);
-                _active.Remove(id);
-            }
-        }
-
         public void Detach()
         {
             if (_hwnd != IntPtr.Zero)
@@ -81,15 +70,19 @@ namespace Cooopy.Services
                     case "shift":
                         mods |= Native.MOD_SHIFT;
                         break;
+                    // Win 键已不再作为快捷键修饰键：出现即判为无效，
+                    // 不能落到 default 分支被当成普通按键解析。
                     case "win":
-                        mods |= Native.MOD_WIN;
-                        break;
+                    case "windows":
+                    case "meta":
+                        return null;
                     default:
                         key = raw;
                         break;
                 }
             }
 
+            // 组合键必须以 Ctrl / Shift / Alt 开头（单独一个键不能注册为全局热键）。
             if (key == null || mods == 0) return null;
             var vk = KeyToVirtualKey(key);
             return vk == 0 ? null : (mods, vk);
@@ -187,7 +180,6 @@ namespace Cooopy.Services
             if (modifiers.HasFlag(ModifierKeys.Control)) parts.Add("Ctrl");
             if (modifiers.HasFlag(ModifierKeys.Alt)) parts.Add("Alt");
             if (modifiers.HasFlag(ModifierKeys.Shift)) parts.Add("Shift");
-            if (modifiers.HasFlag(ModifierKeys.Windows)) parts.Add("Win");
             parts.Add(keyName);
             return string.Join("+", parts);
         }

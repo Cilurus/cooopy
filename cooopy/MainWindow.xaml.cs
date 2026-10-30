@@ -31,7 +31,6 @@ namespace Cooopy
         private List<TagFilterOption> _filterOptions = new();
 
         private TrayService _tray;
-        private RightClickService _rightClick;
         private TagPopupWindow _popup;
         private HwndSource _source;
         private IntPtr _hwnd;
@@ -92,6 +91,8 @@ namespace Cooopy
                 UpdateHeader();
                 UpdateDataStat();
             };
+
+            _store.SaveFailed += OnSaveFailed;
 
             _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.2) };
             _toastTimer.Tick += (_, _) =>
@@ -230,16 +231,16 @@ namespace Cooopy
                 _tray.ExitRequested += ExitApp;
                 App.Log("tray created");
 
-                _rightClick = new RightClickService(
-                    () => _store.Data.Settings,
-                    () => _popup != null && _popup.IsVisible,
-                    () => _popup?.GetPhysicalRect(),
-                    () => _popup?.OutsideClick(),
-                    ShowTagPopup);
-                _rightClick.Notice += message =>
-                    Dispatcher.BeginInvoke(new Action(() => ShowToast(message)));
-                _rightClick.Install();
-                App.Log("right click hook installed: " + _rightClick.IsInstalled);
+                // 低完整性级别运行时（例如被某些启动器拉起）会写不进数据目录：
+                // 记录照常能加进内存，但一关窗口就全丢。启动时就说清楚，别让用户以为已经存下来了。
+                if (!_store.CanWriteDataDir())
+                {
+                    App.Log("data dir NOT writable: " + _store.DataDir);
+                    ShowToast("数据目录不可写，新增记录关闭后会丢");
+                    _tray.ShowBalloon("cooopy 无法保存数据",
+                        $"数据目录不可写：{_store.DataDir}\n请关闭 cooopy，然后从资源管理器双击 cooopy.exe 重新启动。",
+                        8000);
+                }
 
                 LoadSettingsToUi();
                 RefreshAll();
@@ -274,7 +275,7 @@ namespace Cooopy
                 case Native.WM_HOTKEY:
                     var id = wParam.ToInt32();
                     if (id == HotkeyService.IdMain) ToggleMainWindow();
-                    else if (id == HotkeyService.IdSave) CaptureSelectionAndShowPopup();
+                    else if (id == HotkeyService.IdSave) ShowTagPopupFromClipboard();
                     break;
             }
 
@@ -326,7 +327,6 @@ namespace Cooopy
                 _toastTimer?.Stop();
                 _searchTimer?.Stop();
                 _pauseTimer?.Stop();
-                _rightClick?.Dispose();
                 _tray?.Dispose();
                 _popup?.Close();
                 _recordEditor?.Close();
@@ -372,45 +372,33 @@ namespace Cooopy
         {
             var settings = _store.Data.Settings;
 
-            (bool ok, string error) main = (true, null);
-            if (settings.HotkeyMainEnabled) main = _hotkeys.Apply(HotkeyService.IdMain, settings.HotkeyMain);
-            else _hotkeys.Disable(HotkeyService.IdMain);
+            // Win 键已不再支持：历史配置里存过 Win 组合的，直接回落默认，
+            // 否则会注册失败，用户只会看到一句“格式无效”。
+            if (!IsHotkeyUsable(settings.HotkeyMain) || !IsHotkeyUsable(settings.HotkeySave))
+            {
+                _store.UpdateSettings(s =>
+                {
+                    if (!IsHotkeyUsable(s.HotkeyMain)) s.HotkeyMain = "Ctrl+Alt+C";
+                    if (!IsHotkeyUsable(s.HotkeySave)) s.HotkeySave = "Ctrl+Alt+S";
+                });
 
-            (bool ok, string error) save = (true, null);
-            if (settings.HotkeySaveEnabled) save = _hotkeys.Apply(HotkeyService.IdSave, settings.HotkeySave);
-            else _hotkeys.Disable(HotkeyService.IdSave);
+                if (HotkeyMainBox != null) HotkeyMainBox.Text = settings.HotkeyMain;
+                if (HotkeySaveBox != null) HotkeySaveBox.Text = settings.HotkeySave;
+                App.Log($"hotkeys migrated to defaults: main={settings.HotkeyMain} save={settings.HotkeySave}");
+                ShowToast("Win 键组合已不再支持，已恢复默认快捷键");
+            }
 
-            App.Log($"hotkeys: main={settings.HotkeyMain}/{main.ok}/enabled={settings.HotkeyMainEnabled} " +
-                    $"save={settings.HotkeySave}/{save.ok}/enabled={settings.HotkeySaveEnabled}");
-            if (settings.HotkeyMainEnabled && !main.ok) ShowToast(main.error);
-            else if (settings.HotkeySaveEnabled && !save.ok) ShowToast(save.error);
+            (bool ok, string error) main = _hotkeys.Apply(HotkeyService.IdMain, settings.HotkeyMain);
+            (bool ok, string error) save = _hotkeys.Apply(HotkeyService.IdSave, settings.HotkeySave);
+
+            App.Log($"hotkeys: main={settings.HotkeyMain}/{main.ok} save={settings.HotkeySave}/{save.ok}");
+
+            if (!main.ok) ShowToast(main.error);
+            else if (!save.ok) ShowToast(save.error);
         }
 
-        private void HotkeyEnabled_Changed(object sender, RoutedEventArgs e)
-        {
-            if (_loadingSettings) return;
-            UpdateHotkeyEnableUi();
-            PersistSettings();
-            ApplyHotkeys();
-        }
-
-        private void UpdateHotkeyEnableUi()
-        {
-            var mainEnabled = ChkHotkeyMainEnabled?.IsChecked == true;
-            var saveEnabled = ChkHotkeySaveEnabled?.IsChecked == true;
-
-            if (HotkeyMainBox != null) HotkeyMainBox.IsEnabled = mainEnabled;
-            if (HotkeyMainResetButton != null) HotkeyMainResetButton.IsEnabled = mainEnabled;
-            if (HotkeySaveBox != null) HotkeySaveBox.IsEnabled = saveEnabled;
-            if (HotkeySaveResetButton != null) HotkeySaveResetButton.IsEnabled = saveEnabled;
-
-            // 关闭时如果输入框正聚焦，结束录制状态
-            if (!mainEnabled && HotkeyMainBox != null && HotkeyMainBox.IsKeyboardFocusWithin)
-                Keyboard.ClearFocus();
-            if (!saveEnabled && HotkeySaveBox != null && HotkeySaveBox.IsKeyboardFocusWithin)
-                Keyboard.ClearFocus();
-            UpdateHotkeyHook();
-        }
+        /// <summary>组合键是否还能被注册：必须带 Ctrl / Shift / Alt，且不含 Win。</summary>
+        private static bool IsHotkeyUsable(string combo) => HotkeyService.Parse(combo) != null;
 
         private void HotkeyBox_GotFocus(object sender, RoutedEventArgs e)
         {
@@ -421,8 +409,8 @@ namespace Cooopy
         private void HotkeyBox_LostFocus(object sender, RoutedEventArgs e) => UpdateHotkeyHook();
 
         /// <summary>
-        /// 录制快捷键时使用低级键盘钩子：这样 Win 键（以及 Win+字母 这类系统组合）也能被捕获，
-        /// 并且在录制期间屏蔽系统/输入框的默认处理。
+        /// 录制快捷键时使用低级键盘钩子：这样组合键不会被输入框/系统先吃掉，
+        /// 并且在录制期间屏蔽系统的默认处理。Win 键不再是合法修饰键，按下会被吞掉并提示。
         /// </summary>
         private void UpdateHotkeyHook()
         {
@@ -497,7 +485,7 @@ namespace Cooopy
         private bool _hkCtrl;
         private bool _hkAlt;
         private bool _hkShift;
-        private bool _hkWin;
+        private bool _winKeyNotified;
 
         private bool TrackHotkeyModifier(int vk, bool down)
         {
@@ -518,9 +506,16 @@ namespace Cooopy
                 case 0xA5:
                     _hkAlt = down;
                     return true;
+                // Win 键不再是合法修饰键：按键本身吞掉（不让开始菜单弹出来），
+                // 但不计入修饰键，并提示一次，否则用户会以为录制没反应。
                 case 0x5B:
                 case 0x5C:
-                    _hkWin = down;
+                    if (down && !_winKeyNotified)
+                    {
+                        _winKeyNotified = true;
+                        Dispatcher.BeginInvoke(new Action(() =>
+                            ShowToast("不支持 Win 键，请用 Ctrl / Shift / Alt 开头")));
+                    }
                     return true;
                 default:
                     return false;
@@ -533,7 +528,6 @@ namespace Cooopy
             if (_hkCtrl) modifiers |= ModifierKeys.Control;
             if (_hkAlt) modifiers |= ModifierKeys.Alt;
             if (_hkShift) modifiers |= ModifierKeys.Shift;
-            if (_hkWin) modifiers |= ModifierKeys.Windows;
             return modifiers;
         }
 
@@ -542,7 +536,7 @@ namespace Cooopy
             _hkCtrl = false;
             _hkAlt = false;
             _hkShift = false;
-            _hkWin = false;
+            _winKeyNotified = false;
         }
 
         private void ApplyRecordedHotkey(TextBox box, string combo)
@@ -575,8 +569,6 @@ namespace Cooopy
 
             var key = e.Key == Key.System ? e.SystemKey : e.Key;
             var modifiers = Keyboard.Modifiers;
-            if (Native.IsKeyDown(Native.VK_LWIN) || Native.IsKeyDown(Native.VK_RWIN))
-                modifiers |= ModifierKeys.Windows;
 
             var combo = HotkeyService.FromKeyEvent(key, modifiers);
             if (combo == null || !combo.Contains('+')) return;
@@ -595,75 +587,30 @@ namespace Cooopy
             }
 
             Native.GetCursorPos(out var point);
-            ShowTagPopupInternal(text, false, point, null);
+            ShowTagPopupInternal(text, point);
         }
 
         /// <summary>
-        /// “cooopy 到剪贴板”快捷键：先把当前光标选中的内容复制（Ctrl+C），
-        /// 再打开快速打标签弹窗；如果没取到选中内容，则显示当前剪贴板里的内容。
+        /// “cooopy 到剪贴板”快捷键：只读剪贴板，不模拟任何按键。
+        /// 弹窗里就是剪贴板现有的文本；剪贴板没有文本时弹窗照样出现，文本框空置可直接输入。
+        /// 想存选中的文字，先按一次 Ctrl+C（这一步本身就会被自动收录），再按快捷键打标签即可。
         /// </summary>
-        private async void CaptureSelectionAndShowPopup()
+        private void ShowTagPopupFromClipboard()
         {
-            var started = Stopwatch.StartNew();
             try
             {
-                var previous = ClipboardService.ReadClipboardText();
-                var sequence = Native.GetClipboardSequenceNumber();
+                var text = ClipboardService.ReadClipboardText() ?? string.Empty;
                 Native.GetCursorPos(out var point);
-
-                // 热键的修饰键（Alt / Ctrl / Shift / Win）可能还按着，
-                // 先等它们松开，否则合成的 Ctrl+C 会变成 Ctrl+Alt+C 之类。
-                for (var i = 0; i < 30; i++)
-                {
-                    if (!Native.IsKeyDown(Native.VK_CONTROL) &&
-                        !Native.IsKeyDown(Native.VK_MENU) &&
-                        !Native.IsKeyDown(Native.VK_SHIFT) &&
-                        !Native.IsKeyDown(Native.VK_LWIN) &&
-                        !Native.IsKeyDown(Native.VK_RWIN))
-                        break;
-                    await Task.Delay(10);
-                }
-
-                var captured = false;
-                if (_store.Data.Settings.AutoCopySelection)
-                {
-                    Native.SendCtrlC();
-                    // 有选中文字时剪贴板通常几十毫秒内就变化，短轮询即可；
-                    // 没选中时不要再长时间空等，否则弹窗会明显变慢。
-                    for (var i = 0; i < 7; i++)
-                    {
-                        await Task.Delay(15);
-                        if (Native.GetClipboardSequenceNumber() != sequence)
-                        {
-                            captured = true;
-                            break;
-                        }
-                    }
-                }
-
-                var text = captured ? ClipboardService.ReadClipboardText() : previous;
-                if (string.IsNullOrWhiteSpace(text)) text = previous;
-                if (string.IsNullOrWhiteSpace(text))
-                {
-                    ShowToast("没取到选中文字，剪贴板里也没有文本");
-                    return;
-                }
-
-                ShowTagPopupInternal(text, captured, point, previous);
-                App.Log($"hotkey popup: captured={captured}, elapsed={started.ElapsedMilliseconds}ms");
+                ShowTagPopupInternal(text, point);
+                App.Log($"hotkey popup: len={text.Length}");
             }
             catch (Exception ex)
             {
-                ShowToast("取词失败：" + ex.Message);
+                ShowToast("打开弹窗失败：" + ex.Message);
             }
         }
 
-        private void ShowTagPopup(string text, bool captured, Native.POINT point, string previous)
-        {
-            ShowTagPopupInternal(text, captured, point, previous);
-        }
-
-        private void ShowTagPopupInternal(string text, bool captured, Native.POINT point, string previous)
+        private void ShowTagPopupInternal(string text, Native.POINT point)
         {
             var counts = CountActiveRecordsByTag();
             var tags = _store.Data.Tags
@@ -674,16 +621,28 @@ namespace Cooopy
             if (_popup == null)
             {
                 _popup = new TagPopupWindow();
-                _popup.Saved += (editedText, tagIds) =>
-                    HandleQuickSave(editedText, tagIds, _popup.ContextCaptured, _popup.ContextPrevious);
+                _popup.Saved += (editedText, tagIds) => HandleQuickSave(editedText, tagIds);
             }
 
-            _popup.Reset(text, tags, _store.Data.Settings.QuickTagAutoSave, captured, previous);
+            _popup.Reset(text, tags, _store.Data.Settings.QuickTagAutoSave);
             _popup.ShowAtScreenPoint(point);
         }
 
-        private void HandleQuickSave(string text, IList<string> tagIds, bool captured, string previous)
+        private void HandleQuickSave(string text, IList<string> tagIds)
         {
+            // AddRecord 对空文本 / 超长文本返回 null 且不产生记录，
+            // 这里必须区分“没存进去”和“存进去了”，否则空弹窗点保存会假报“已添加”。
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                ShowToast("内容为空，未保存");
+                return;
+            }
+            if (text.Length > Math.Max(1000, _store.Data.Settings.MaxLength))
+            {
+                ShowToast("内容超长，未保存");
+                return;
+            }
+
             var record = _store.AddRecord(text, tagIds);
             if (record != null && tagIds != null && tagIds.Count > 0)
             {
@@ -702,9 +661,6 @@ namespace Cooopy
                     _store.SaveNow();
                 }
             }
-
-            if (_store.Data.Settings.RestoreClipboard && captured && previous != null)
-                _clipboard.SetClipboardText(previous);
 
             var names = tagIds?
                 .Select(id => _store.FindTag(id)?.Name)
@@ -1993,24 +1949,10 @@ namespace Cooopy
                 var bubbleMode = string.Equals(settings.UiMode, "bubble", StringComparison.OrdinalIgnoreCase);
                 ModeBubbleRadio.IsChecked = bubbleMode;
                 ModeNoteRadio.IsChecked = !bubbleMode;
-                ChkContextEnabled.IsChecked = settings.ContextMenuEnabled;
-                ChkAutoCopy.IsChecked = settings.AutoCopySelection;
-                ChkRestore.IsChecked = settings.RestoreClipboard;
                 ChkAutoCapture.IsChecked = settings.AutoCapture;
                 MaxLengthBox.Text = settings.MaxLength.ToString();
                 HotkeyMainBox.Text = settings.HotkeyMain;
                 HotkeySaveBox.Text = settings.HotkeySave;
-                ChkHotkeyMainEnabled.IsChecked = settings.HotkeyMainEnabled;
-                ChkHotkeySaveEnabled.IsChecked = settings.HotkeySaveEnabled;
-                UpdateHotkeyEnableUi();
-
-                ModifierCombo.SelectedIndex = settings.ContextModifier switch
-                {
-                    "Ctrl" => 1,
-                    "Alt" => 2,
-                    "无" => 3,
-                    _ => 0
-                };
 
                 DedupeCombo.SelectedIndex = settings.DedupeMinutes switch
                 {
@@ -2168,14 +2110,6 @@ namespace Cooopy
             int.TryParse(MaxLengthBox.Text, out maxLength);
             maxLength = Math.Clamp(maxLength, 1000, 200000);
 
-            var modifier = ModifierCombo.SelectedIndex switch
-            {
-                1 => "Ctrl",
-                2 => "Alt",
-                3 => "无",
-                _ => "Shift"
-            };
-
             var dedupe = DedupeCombo.SelectedIndex switch
             {
                 0 => 0,
@@ -2194,14 +2128,8 @@ namespace Cooopy
                 settings.DeepSeekModel = string.IsNullOrWhiteSpace(ModelBox.Text) ? "deepseek-chat" : ModelBox.Text.Trim();
                 settings.AdvancedEnabled = ChkAdvancedEnabled.IsChecked == true;
                 settings.UiMode = ModeBubbleRadio.IsChecked == true ? "bubble" : "note";
-                settings.ContextMenuEnabled = ChkContextEnabled.IsChecked == true;
-                settings.AutoCopySelection = ChkAutoCopy.IsChecked == true;
-                settings.RestoreClipboard = ChkRestore.IsChecked == true;
                 settings.AutoCapture = ChkAutoCapture.IsChecked == true;
-                settings.HotkeyMainEnabled = ChkHotkeyMainEnabled.IsChecked == true;
-                settings.HotkeySaveEnabled = ChkHotkeySaveEnabled.IsChecked == true;
                 settings.MaxLength = maxLength;
-                settings.ContextModifier = modifier;
                 settings.DedupeMinutes = dedupe;
             });
 
@@ -2300,18 +2228,37 @@ namespace Cooopy
 
         private void OpenDataDir_Click(object sender, RoutedEventArgs e)
         {
+            var dir = _store.DataDir;
+            try { Directory.CreateDirectory(dir); } catch { /* 已存在或不可写：仍然尝试打开 */ }
+
+            // 优先用 shell 打开“文件夹本身”，这样由已经在运行的资源管理器接单。
+            // 直接 Process.Start("explorer.exe", dir) 在低完整性级别下启动的 explorer 会立刻退出，
+            // 表现就是“点了没反应/打不开”。
+            try
+            {
+                Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+                return;
+            }
+            catch (Exception ex)
+            {
+                App.Log("open data dir (shell) failed: " + ex.Message);
+            }
+
             try
             {
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "explorer.exe",
-                    Arguments = $"\"{_store.DataDir}\"",
+                    Arguments = $"\"{dir}\"",
                     UseShellExecute = true
                 });
+                return;
             }
             catch (Exception ex)
             {
-                ShowToast("打开目录失败：" + ex.Message);
+                App.Log("open data dir (explorer) failed: " + ex.Message);
+                _clipboard.SetClipboardText(dir);
+                ShowToast("打不开目录，路径已复制到剪贴板");
             }
         }
 
@@ -2481,6 +2428,24 @@ namespace Cooopy
                     e.Handled = true;
                 }
             }
+        }
+
+        private DateTime _lastSaveErrorAt = DateTime.MinValue;
+
+        /// <summary>保存失败时提示一次，否则剪贴板每次变化都会重试、提示会刷屏。</summary>
+        private void OnSaveFailed(string message)
+        {
+            if ((DateTime.Now - _lastSaveErrorAt).TotalMinutes < 5) return;
+            _lastSaveErrorAt = DateTime.Now;
+            App.Log(message);
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (IsVisible && WindowState != WindowState.Minimized)
+                    ShowToast("保存失败，记录可能丢失");
+                else
+                    _tray?.ShowBalloon("cooopy 保存失败", "数据没能写入：" + message, 5000);
+            }));
         }
 
         private void ShowToast(string message)

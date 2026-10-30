@@ -21,6 +21,28 @@ namespace Cooopy.Services
 
         public event Action Changed;
 
+        /// <summary>保存失败时触发，参数是错误描述。用于让界面能把“数据没存进去”告诉用户，
+        /// 而不是只写进一个没人看的字段。</summary>
+        public event Action<string> SaveFailed;
+
+        /// <summary>数据目录当前能否写入。低完整性级别运行时（例如某些方式启动的进程）
+        /// 这里会返回 false，表现为记录照常新增但一关窗口就丢。</summary>
+        public bool CanWriteDataDir()
+        {
+            try
+            {
+                Directory.CreateDirectory(DataDir);
+                var probe = Path.Combine(DataDir, $".write-probe-{Environment.ProcessId}");
+                File.WriteAllText(probe, "ok");
+                File.Delete(probe);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             WriteIndented = false,
@@ -240,6 +262,7 @@ namespace Cooopy.Services
                 catch (Exception ex)
                 {
                     LastLoadError = "保存失败：" + ex.Message;
+                    try { SaveFailed?.Invoke(LastLoadError); } catch { /* 通知失败不影响主流程 */ }
                 }
             }
             RaiseChanged();

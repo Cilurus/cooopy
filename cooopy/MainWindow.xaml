@@ -7,6 +7,8 @@
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         ResizeMode="CanResize"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
         Background="{StaticResource AppBg}"
         FontFamily="{StaticResource UiFont}"
         FontSize="14.5"
@@ -22,19 +24,25 @@
 
     <Window.Resources>
         <DataTemplate x:Key="RecordBubbleTemplate">
-            <Grid x:Name="BubbleRoot" Margin="14,12,16,14">
+            <Grid x:Name="BubbleRoot" Margin="14,12,16,14"
+                  UseLayoutRounding="True" SnapsToDevicePixels="True">
                 <!-- separate shadow layers keep text crisp -->
-                <!-- 环境阴影：四周均匀扩散，保证卡片上方也有一圈淡淡的阴影 -->
+                <!-- 环境阴影：四周均匀扩散，保证卡片上方也有一圈淡淡的阴影。
+                     注意：这两个阴影层只是「用来投影的假卡片」，本身是纯白 Surface。
+                     它们必须比 CardBorder 内缩 1px（圆角 12 -> 11，保持同心），
+                     否则纯白底会在卡片 1px 描边的抗锯齿边缘漏出一条白缝。 -->
                 <Border x:Name="GlowBorder" Background="{StaticResource Surface}"
-                        CornerRadius="12" IsHitTestVisible="False">
+                        BorderBrush="{StaticResource Line}" BorderThickness="1"
+                        CornerRadius="11" Margin="1" IsHitTestVisible="False">
                     <Border.Effect>
                         <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.09" Direction="0" />
                     </Border.Effect>
                 </Border>
 
-                <!-- 方向阴影：向下投，制造卡片浮起的感觉 -->
+                <!-- 方向阴影：向下投，制造卡片浮起的感觉（同样内缩 1px） -->
                 <Border x:Name="ShadowBorder" Background="{StaticResource Surface}"
-                        CornerRadius="12" IsHitTestVisible="False">
+                        BorderBrush="{StaticResource Line}" BorderThickness="1"
+                        CornerRadius="11" Margin="1" IsHitTestVisible="False">
                     <Border.Effect>
                         <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.10" Direction="270" />
                     </Border.Effect>
@@ -769,12 +777,12 @@
                     <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,14">
                         <StackPanel>
                             <TextBlock Text="快捷键" FontSize="16.5" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <TextBlock Text="点击下方输入框后直接按组合键。组合必须以 Ctrl / Shift / Alt 开头，不支持 Win 键。"
+                                       FontSize="12.5" Foreground="{StaticResource TextSecondary}"
+                                       TextWrapping="Wrap" Margin="0,0,0,6" />
 
-                            <CheckBox x:Name="ChkHotkeyMainEnabled" Content="显示 / 隐藏主界面"
-                                      FontSize="13.5" Foreground="{StaticResource TextSecondary}"
-                                      Margin="0,4,0,4" VerticalAlignment="Center"
-                                      Checked="HotkeyEnabled_Changed"
-                                      Unchecked="HotkeyEnabled_Changed" />
+                            <TextBlock Text="显示 / 隐藏主界面" FontSize="13.5"
+                                       Foreground="{StaticResource TextSecondary}" Margin="0,4,0,4" />
                             <StackPanel Orientation="Horizontal">
                                 <TextBox x:Name="HotkeyMainBox" Style="{StaticResource Input}" Width="220"
                                          AutomationProperties.Name="主界面快捷键"
@@ -791,11 +799,8 @@
                                 </Button>
                             </StackPanel>
 
-                            <CheckBox x:Name="ChkHotkeySaveEnabled" Content="cooopy 到剪贴板"
-                                      FontSize="13.5" Foreground="{StaticResource TextSecondary}"
-                                      Margin="0,12,0,4" VerticalAlignment="Center"
-                                      Checked="HotkeyEnabled_Changed"
-                                      Unchecked="HotkeyEnabled_Changed" />
+                            <TextBlock Text="cooopy 到剪贴板（弹窗填入剪贴板内容）" FontSize="13.5"
+                                       Foreground="{StaticResource TextSecondary}" Margin="0,12,0,4" />
                             <StackPanel Orientation="Horizontal">
                                 <TextBox x:Name="HotkeySaveBox" Style="{StaticResource Input}" Width="220"
                                          AutomationProperties.Name="快速打标快捷键"
@@ -811,23 +816,6 @@
                                                Foreground="{StaticResource TextSecondary}" />
                                 </Button>
                             </StackPanel>
-
-                            <Border Height="1" Background="{StaticResource Line}" Margin="0,14,0,6" />
-
-                            <CheckBox x:Name="ChkContextEnabled" Content="右键 cooopy"
-                                      Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click" />
-                            <ComboBox x:Name="ModifierCombo" Width="150" Margin="0,6,0,0"
-                                      HorizontalAlignment="Left"
-                                      SelectionChanged="SettingsChanged_SelectionChanged">
-                                <ComboBoxItem Content="Shift" />
-                                <ComboBoxItem Content="Ctrl" />
-                                <ComboBoxItem Content="Alt" />
-                                <ComboBoxItem Content="无（直接右键）" Tag="无" />
-                            </ComboBox>
-                            <CheckBox x:Name="ChkAutoCopy" Content="自动复制选中的文字"
-                                      Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click" Margin="0,8,0,0" />
-                            <CheckBox x:Name="ChkRestore" Content="保存后恢复 cooopy 前的剪贴板内容"
-                                      Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click" />
                         </StackPanel>
                     </Border>
 

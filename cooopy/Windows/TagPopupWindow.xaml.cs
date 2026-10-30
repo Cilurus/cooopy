@@ -15,10 +15,6 @@ namespace Cooopy.Windows
         private bool _closeScheduled;
         private int _showVersion;
 
-        /// <summary>这次弹窗对应的取词上下文，供 Saved 处理时还原剪贴板。</summary>
-        public bool ContextCaptured { get; private set; }
-        public string ContextPrevious { get; private set; }
-
         /// <summary>Raised with the edited text and the selected tag ids.</summary>
         public event Action<string, List<string>> Saved;
 
@@ -28,13 +24,10 @@ namespace Cooopy.Windows
         }
 
         /// <summary>复用同一个窗口实例，避免每次取词都重新创建 WPF 窗口和模板（明显降低弹窗延迟）。</summary>
-        public void Reset(string text, IEnumerable<TagItem> tags, bool autoSave,
-            bool captured, string previous)
+        public void Reset(string text, IEnumerable<TagItem> tags, bool autoSave)
         {
             _originalText = text ?? "";
             _autoSave = autoSave;
-            ContextCaptured = captured;
-            ContextPrevious = previous;
             _selected.Clear();
             _closing = false;
             _closeScheduled = false;
@@ -80,13 +73,11 @@ namespace Cooopy.Windows
             Native.SetWindowPos(hwnd, Native.HWND_TOPMOST, x, y, 0, 0,
                 Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
             Opacity = 1;
-        }
 
-        public Native.RECT? GetPhysicalRect()
-        {
-            if (!IsVisible) return null;
-            var hwnd = new WindowInteropHelper(this).Handle;
-            return Native.GetWindowRect(hwnd, out var rect) ? rect : null;
+            // 空文本框场景（无选中且剪贴板无文本）要能直接打字：
+            // 焦点默认会落在保存按钮上，这里把焦点移到输入框并把光标放到末尾。
+            ContentBox.Focus();
+            ContentBox.CaretIndex = ContentBox.Text.Length;
         }
 
         private void BuildTags(IEnumerable<TagItem> tags)
