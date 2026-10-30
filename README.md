@@ -53,7 +53,15 @@ dotnet publish cooopy/cooopy.csproj -c Release -r win-x64 --self-contained true 
 
 ## 发布新版本
 
-打 tag 并推送后，GitHub Actions 会自动构建便携包并创建 Release：
+推荐用根目录的 `publish.ps1`，一条命令完成「改版本号 → 提交 → 打 tag → 推送」，GitHub Actions 随后自动构建并创建 Release：
+
+```powershell
+.\publish.ps1 -Patch              # 0.1.0 -> 0.1.1
+.\publish.ps1 -Version 0.2.0      # 指定版本号
+.\publish.ps1 -Patch -DryRun      # 只检查，不提交/推送
+```
+
+也可以手动打 tag：
 
 ```powershell
 git tag v0.1.0
@@ -74,6 +82,7 @@ cooopy/
   App.xaml         应用入口
   release.ps1      生成 Release 压缩包
   cooopy.csproj
+publish.ps1        一键发布新版本
 .github/workflows/release.yml
 ```
 
