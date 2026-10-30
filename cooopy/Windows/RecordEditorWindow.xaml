@@ -1,0 +1,55 @@
+<Window x:Class="Cooopy.Windows.RecordEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="编辑记录"
+        Width="620"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        FontFamily="{StaticResource UiFont}"
+        Deactivated="Window_Deactivated"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
+
+    <Grid Margin="16">
+        <Border Background="{StaticResource Surface}" CornerRadius="12">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.20" />
+            </Border.Effect>
+        </Border>
+
+        <Border Background="{StaticResource Surface}" CornerRadius="12"
+                Padding="20,18" BorderBrush="{StaticResource Line}" BorderThickness="1">
+            <StackPanel>
+                <TextBlock Text="编辑记录" FontSize="16.5" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextPrimary}" Margin="0,0,0,12" />
+
+                <TextBox x:Name="TextBox" Style="{StaticResource Input}"
+                         Height="140" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalContentAlignment="Top"
+                         VerticalScrollBarVisibility="Auto"
+                         FontSize="14.5" Padding="4" />
+
+                <TextBlock Text="标签" FontSize="13.5" Foreground="{StaticResource TextSecondary}"
+                           Margin="0,14,0,8" />
+                <ScrollViewer Style="{StaticResource ReservedScrollViewer}" MaxHeight="150" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <WrapPanel x:Name="TagPanel" />
+                </ScrollViewer>
+                <TextBlock x:Name="EmptyTagHint" Text="还没有标签，可在「标签」页创建"
+                           FontSize="13.5" Foreground="{StaticResource TextMuted}"
+                           Margin="0,6,0,0" Visibility="Collapsed" />
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                    <Button Style="{StaticResource GhostButton}" Content="取消" Margin="0,0,10,0"
+                            Click="Cancel_Click" />
+                    <Button Style="{StaticResource PrimaryButton}" Content="保存" IsDefault="True"
+                            Click="Save_Click" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

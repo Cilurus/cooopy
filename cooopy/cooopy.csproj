@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>cooopy.ico</ApplicationIcon>
+    <AssemblyName>cooopy</AssemblyName>
+    <RootNamespace>Cooopy</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>cooopy</Authors>
+    <Product>cooopy</Product>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="cooopy.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+</Project>
