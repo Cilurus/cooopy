@@ -66,12 +66,15 @@ namespace Cooopy.Services
 
             // Ignore writes performed by cooopy itself.
             if (_lastKnownText != null && text == _lastKnownText) return;
-            _lastKnownText = text;
 
             var settings = _store.Data.Settings;
             if (!settings.AutoCapture || settings.Paused) return;
             if (text.Length > settings.MaxLength) return;
             if (string.IsNullOrWhiteSpace(text)) return;
+
+            // 只有真正准备入库时才记录文本；暂停/超长/关闭自动采集期间的内容
+            // 不应影响恢复后再次复制同一段文字。
+            _lastKnownText = text;
 
             var record = _store.AddRecord(text);
             if (record != null) Captured?.Invoke(record);

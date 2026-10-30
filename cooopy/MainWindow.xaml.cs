@@ -55,6 +55,7 @@ namespace Cooopy
         private readonly DeepSeekService _deepSeek = new();
         private readonly List<DeepSeekService.ChatMessage> _chatHistory = new();
         private DispatcherTimer _searchTimer;
+        private DispatcherTimer _pauseTimer;
         private bool _chatBusy;
         private DispatcherTimer _aiCheckTimer;
         private bool _aiChecking;
@@ -66,6 +67,7 @@ namespace Cooopy
         private string _inlineEditId;
         private RecordRow _inlineEditRow;
         private bool _clampingBubbleScroll;
+        private bool _recordsRefreshPending;
 
         public MainWindow(DataStore store)
         {
@@ -105,6 +107,15 @@ namespace Cooopy
             {
                 _searchTimer.Stop();
                 if (_initialized) RefreshRecords();
+            };
+
+            // 暂停 30 分钟到期后自动恢复界面/托盘状态。
+            _pauseTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+            _pauseTimer.Tick += (_, _) =>
+            {
+                if (_store.Data.Settings.Paused) return;
+                _pauseTimer.Stop();
+                UpdatePauseUi();
             };
 
             _aiCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
@@ -293,6 +304,16 @@ namespace Cooopy
 
         private void Cleanup()
         {
+            // 先落盘，避免某个窗口/托盘释放异常导致数据没保存。
+            try
+            {
+                _store.FlushPending();
+            }
+            catch
+            {
+                // ignored
+            }
+
             try
             {
                 if (_hotkeyHook != IntPtr.Zero)
@@ -303,13 +324,14 @@ namespace Cooopy
                 _hotkeys.Detach();
                 if (_hwnd != IntPtr.Zero) _clipboard.Detach(_hwnd);
                 _toastTimer?.Stop();
+                _searchTimer?.Stop();
+                _pauseTimer?.Stop();
                 _rightClick?.Dispose();
                 _tray?.Dispose();
                 _popup?.Close();
                 _recordEditor?.Close();
                 _tagEditor?.Close();
                 _deepSeek?.Dispose();
-                _store.FlushPending();
             }
             catch
             {
@@ -785,6 +807,24 @@ namespace Cooopy
         {
             var settings = _store.Data.Settings;
             var bubble = string.Equals(settings.UiMode, "bubble", StringComparison.OrdinalIgnoreCase);
+
+            // 气泡内正在编辑时不要重建列表，否则刚输入的内容会被剪贴板/搜索刷新冲掉。
+            if (_inlineEditRow != null && bubble &&
+                RecordsPanel != null && RecordsPanel.Visibility == Visibility.Visible)
+            {
+                _recordsRefreshPending = true;
+                return;
+            }
+
+            // 切换模式或编辑行已经不在当前页面时，放弃未保存的行内编辑状态。
+            if (_inlineEditRow != null)
+            {
+                _inlineEditRow.IsEditing = false;
+                _inlineEditRow = null;
+                _inlineEditId = null;
+            }
+
+            _recordsRefreshPending = false;
             var tagMap = _store.Data.Tags.ToDictionary(t => t.Id, StringComparer.Ordinal);
             IEnumerable<RecordItem> query = _store.Data.Records.Where(r => !r.Deleted);
 
@@ -904,6 +944,7 @@ namespace Cooopy
                     row.IsEditing = false;
                     _inlineEditId = null;
                     _inlineEditRow = null;
+                    FlushPendingRecordsRefresh();
                     return;
                 }
 
@@ -1051,6 +1092,14 @@ namespace Cooopy
 
             _inlineEditId = null;
             _inlineEditRow = null;
+            FlushPendingRecordsRefresh();
+        }
+
+        private void FlushPendingRecordsRefresh()
+        {
+            if (!_recordsRefreshPending) return;
+            _recordsRefreshPending = false;
+            RefreshRecords();
         }
 
         private void ToggleEditTag_Click(object sender, MouseButtonEventArgs e)
@@ -2209,6 +2258,20 @@ namespace Cooopy
             PauseButton.Content = paused ? "恢复记录" : "暂停记录 30 分钟";
             PauseInfo.Text = paused ? "暂停期间复制的内容不会入库" : "";
             _tray?.SetPaused(paused);
+            SyncPauseTimer();
+        }
+
+        private void SyncPauseTimer()
+        {
+            if (_pauseTimer == null) return;
+            if (_store.Data.Settings.Paused)
+            {
+                if (!_pauseTimer.IsEnabled) _pauseTimer.Start();
+            }
+            else if (_pauseTimer.IsEnabled)
+            {
+                _pauseTimer.Stop();
+            }
         }
 
         private void UpdateHeader()
