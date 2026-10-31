@@ -1075,12 +1075,27 @@ namespace Cooopy
             {
                 if (switching)
                 {
-                    // 先放宽 MaxWidth、再设 Width、最后收紧 MinWidth：
-                    // 若先设 MinWidth=780，窗口会被先钳到 780 再跳到目标宽度，出现两次回流。
+                    // 最大化状态下切回笔记模式：先退出最大化、设好宽度，再重新最大化。
+                    // 不这么做 Width 赋值会被最大化状态吞掉，窗口停在卡片模式钳出来的
+                    // 窄长条上；重新最大化还能把 RestoreBounds 修正为笔记宽度，
+                    // 之后取消最大化也不会掉回 360。
+                    var wasMaximized = WindowState == WindowState.Maximized;
                     MaxWidth = double.PositiveInfinity;
-                    var target = Math.Max(_noteWindowWidth, 780);
-                    if (Math.Abs(Width - target) > 0.5) Width = target;
                     MinWidth = 780;
+                    if (wasMaximized)
+                    {
+                        WindowState = WindowState.Normal;
+                        Width = Math.Max(_noteWindowWidth, 780);
+                        // 重新最大化延迟一拍：等 Max/Min/Width 全部生效后再最大化，
+                        // 否则 Win32 最大化仍按旧的 MaxWidth=360 钳制，窗口保持窄条。
+                        Dispatcher.BeginInvoke(() => WindowState = WindowState.Maximized,
+                            DispatcherPriority.Loaded);
+                    }
+                    else
+                    {
+                        var target = Math.Max(_noteWindowWidth, 780);
+                        if (Math.Abs(Width - target) > 0.5) Width = target;
+                    }
                 }
             }
 
