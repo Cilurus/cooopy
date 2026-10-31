@@ -163,6 +163,13 @@ namespace Cooopy.Services
                     Data.Settings ??= new AppSettings();
                     Data.Records.RemoveAll(r => r == null);
                     Data.Tags.RemoveAll(t => t == null);
+                    // 旧版 data.json 里的 API Key 是明文：迁入加密存储并立即落盘一次。
+                    var storedKey = Data.Settings.DeepSeekApiKeyStored;
+                    if (!string.IsNullOrEmpty(storedKey) && !storedKey.StartsWith("enc:v1:", StringComparison.Ordinal))
+                    {
+                        Data.Settings.DeepSeekApiKeyStored = Services.SecretProtector.Protect(storedKey);
+                        SaveNow();
+                    }
                     EnsureBackup();
                 }
                 catch (Exception ex)
@@ -216,18 +223,38 @@ namespace Cooopy.Services
 
         private void EnsureBackup()
         {
+            // 每天首次启动备份一次，并轮换历史备份：data.backup.json → .1 → .2 ... .6
+            //（连同当前共保留最近 7 天，旧的自动淘汰）。
             try
             {
                 var info = new FileInfo(DataFile);
                 var backupInfo = new FileInfo(BackupFile);
-                if (!backupInfo.Exists || info.LastWriteTime.Date > backupInfo.LastWriteTime.Date)
-                    File.Copy(DataFile, BackupFile, true);
+                if (backupInfo.Exists && info.LastWriteTime.Date <= backupInfo.LastWriteTime.Date)
+                    return;
+
+                for (var i = RingBackups - 1; i >= 1; i--)
+                {
+                    var src = Path.Combine(DataDir, $"data.backup.{i}.json");
+                    if (!File.Exists(src)) continue;
+                    var dst = Path.Combine(DataDir, $"data.backup.{i + 1}.json");
+                    if (File.Exists(dst)) File.Delete(dst);
+                    File.Move(src, dst);
+                }
+                if (backupInfo.Exists)
+                {
+                    var first = Path.Combine(DataDir, "data.backup.1.json");
+                    if (File.Exists(first)) File.Delete(first);
+                    File.Move(BackupFile, first);
+                }
+                File.Copy(DataFile, BackupFile, true);
             }
             catch
             {
                 // ignored
             }
         }
+
+        private const int RingBackups = 6;
 
         public void Save() => ScheduleSave();
 
@@ -419,11 +446,18 @@ namespace Cooopy.Services
 
         // ---------------------------------------------------------------- import / export
 
+        /// <summary>最近一次导出时因「私密记录」被跳过的条数，供界面提示用。</summary>
+        public int LastExportSkipped { get; private set; }
+
         public string ExportJson(string path, bool onlySelected = false, IEnumerable<RecordItem> selected = null)
         {
-            var records = onlySelected && selected != null
+            var source = onlySelected && selected != null
                 ? selected.ToList()
                 : Data.Records.Where(r => !r.Deleted).ToList();
+
+            // 私密记录默认不进导出文件，避免明文外流。
+            var records = source.Where(r => !BuiltinTags.IsPrivate(r)).ToList();
+            LastExportSkipped = source.Count - records.Count;
             var tags = Data.Tags.ToList();
 
             var payload = new
@@ -444,7 +478,9 @@ namespace Cooopy.Services
             sb.AppendLine("# cooopy 导出（" + DateTime.Now.ToString("yyyy-MM-dd") + "）");
             sb.AppendLine();
 
-            var records = Data.Records.Where(r => !r.Deleted)
+            var all = Data.Records.Where(r => !r.Deleted).ToList();
+            LastExportSkipped = all.Count(BuiltinTags.IsPrivate);
+            var records = all.Where(r => !BuiltinTags.IsPrivate(r))
                 .OrderByDescending(r => r.CreatedAt).ToList();
             var groups = records.GroupBy(r => r.TagIds.Count == 0
                 ? "未分类"

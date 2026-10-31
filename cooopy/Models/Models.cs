@@ -48,9 +48,11 @@ namespace Cooopy.Models
         public const string UrgentRedId = "builtin-urgent-red";
         public const string UrgentYellowId = "builtin-urgent-yellow";
         public const string UrgentGreenId = "builtin-urgent-green";
+        public const string PrivateId = "builtin-private";
 
         public const string KindPin = "pin";
         public const string KindUrgency = "urgency";
+        public const string KindPrivate = "private";
 
         public static readonly (string Id, string Name, string Color, string Kind)[] All =
         {
@@ -58,9 +60,16 @@ namespace Cooopy.Models
             (UrgentRedId, "紧急", "#E5484D", KindUrgency),
             (UrgentYellowId, "较急", "#F2A93B", KindUrgency),
             (UrgentGreenId, "不急", "#37A855", KindUrgency),
+            (PrivateId, "私密", "#6B7280", KindPrivate),
         };
 
         public static bool IsPin(string id) => string.Equals(id, PinId, StringComparison.Ordinal);
+
+        public static bool IsPrivate(string id) => string.Equals(id, PrivateId, StringComparison.Ordinal);
+
+        /// <summary>记录是否被标记为私密。唯一真源是标签，避免和字段双写。</summary>
+        public static bool IsPrivate(RecordItem record) =>
+            record?.TagIds != null && record.TagIds.Any(IsPrivate);
 
         public static bool IsUrgency(string id) =>
             id == UrgentRedId || id == UrgentYellowId || id == UrgentGreenId;
@@ -86,18 +95,40 @@ namespace Cooopy.Models
     {
         public string HotkeyMain { get; set; } = "Ctrl+Alt+C";
         public string HotkeySave { get; set; } = "Ctrl+Alt+S";
+        public bool HotkeyMainEnabled { get; set; } = true;
+        public bool HotkeySaveEnabled { get; set; } = true;
         public bool AutoCapture { get; set; } = true;
+        public bool MaskIdCards { get; set; } = true;
         public int MaxLength { get; set; } = 20000;
         public int DedupeMinutes { get; set; } = 1440;
         public long PauseUntil { get; set; }
         public bool CloseToTray { get; set; } = true;
         public bool StartMinimized { get; set; } = false;
+
+        /// <summary>主界面窗口置顶。</summary>
+        public bool AlwaysOnTop { get; set; } = false;
+
+        /// <summary>上次退出时的窗口位置/尺寸（0 = 无记录，首次运行居中）。</summary>
+        public double WinLeft { get; set; }
+        public double WinTop { get; set; }
+        public double WinWidth { get; set; }
+        public double WinHeight { get; set; }
         public string SortMode { get; set; } = "time_desc";
         public bool HideUntagged { get; set; }
         public bool QuickTagAutoSave { get; set; } = true;
-        public bool TextBoxShortcuts { get; set; } = true;
         public string DeepSeekApiUrl { get; set; } = "https://api.deepseek.com";
-        public string DeepSeekApiKey { get; set; } = "";
+
+        /// <summary>DeepSeek API Key。对外读写都是明文；落盘前用 DPAPI 加密，
+        /// data.json 里只存 "enc:v1:" 前缀的密文（历史明文在加载时自动迁移）。</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string DeepSeekApiKey
+        {
+            get => Services.SecretProtector.Unprotect(DeepSeekApiKeyStored);
+            set => DeepSeekApiKeyStored = Services.SecretProtector.Protect(value ?? "");
+        }
+
+        [System.Text.Json.Serialization.JsonPropertyName("DeepSeekApiKey")]
+        public string DeepSeekApiKeyStored { get; set; } = "";
         public string DeepSeekModel { get; set; } = "deepseek-chat";
         public bool AdvancedEnabled { get; set; }
         public string UiMode { get; set; } = "note";
@@ -120,6 +151,11 @@ namespace Cooopy.Models
         public List<TagItem> Tags { get; set; } = new();
         public string TimeText { get; set; }
         public string Preview { get; set; }
+
+        /// <summary>气泡卡片正文。私密且未解锁时是掩码文本，其余情况等于 Record.Text。</summary>
+        public string DisplayText { get; set; }
+
+        public bool IsPrivateLocked { get; set; }
 
         private string _editText;
         public string EditText
@@ -146,6 +182,10 @@ namespace Cooopy.Models
         }
         public bool Pinned => Record.Pinned;
         public Visibility PinVisibility => Record.Pinned ? Visibility.Visible : Visibility.Collapsed;
+
+        /// <summary>私密标记图标（眼睛带斜杠），在时间旁与置顶/紧急程度并排显示。</summary>
+        public Visibility LockVisibility =>
+            BuiltinTags.IsPrivate(Record) ? Visibility.Visible : Visibility.Collapsed;
 
         /// <summary>Urgency (red / yellow / green) ball shown next to the record time.</summary>
         public Brush UrgencyBrush { get; set; }

@@ -39,6 +39,8 @@ namespace Cooopy
         private bool _hotkeyApplyPending;
         private bool _initialized;
         private bool _exiting;
+        private bool _sessionEnding;
+        private int _taskbarCreatedMsg;
         private bool _loadingSettings;
         private sealed class UndoEntry
         {
@@ -63,23 +65,55 @@ namespace Cooopy
         private bool _suppressAdvancedToggle;
         private string _aiCheckedSignature;
         private double _noteWindowWidth = 1000;
+        private string _appliedUiMode;
         private string _inlineEditId;
         private RecordRow _inlineEditRow;
         private bool _clampingBubbleScroll;
         private bool _recordsRefreshPending;
+
+        /// <summary>私密记录未解锁时显示的占位文本（固定 8 个星号，不泄露原文长度）。</summary>
+        private const string LockedPlaceholder = "🔒 ********";
+
+        /// <summary>最近一次取词时的目标窗口（连续取词时把焦点还给它的凭据）。</summary>
+        private IntPtr _lastTargetWindow;
+
+        private DispatcherTimer _lockTimer;
+        private bool _wasUnlocked;
 
         public MainWindow(DataStore store)
         {
             _store = store;
             InitializeComponent();
 
-            // Keep the window inside the current work area (small screens / high DPI).
+            // 恢复上次的窗口位置/尺寸；没有有效记录（首次运行/分辨率变化）则居中。
+            var settings0 = store.Data.Settings;
             var work = SystemParameters.WorkArea;
-            Width = Math.Max(MinWidth, Math.Min(Width, work.Width - 60));
-            Height = Math.Max(MinHeight, Math.Min(Height, work.Height - 48));
             WindowStartupLocation = WindowStartupLocation.Manual;
-            Left = work.Left + (work.Width - Width) / 2;
-            Top = work.Top + (work.Height - Height) / 2;
+            if (settings0.WinWidth >= MinWidth && settings0.WinHeight >= MinHeight)
+            {
+                Width = settings0.WinWidth;
+                Height = Math.Max(MinHeight, Math.Min(settings0.WinHeight, work.Height + 40));
+                Left = settings0.WinLeft;
+                Top = settings0.WinTop;
+                // 防止分辨率变化后窗口落在屏幕外：越界时拉回并回退为居中。
+                var vsLeft = SystemParameters.VirtualScreenLeft;
+                var vsTop = SystemParameters.VirtualScreenTop;
+                var vsRight = vsLeft + SystemParameters.VirtualScreenWidth;
+                var vsBottom = vsTop + SystemParameters.VirtualScreenHeight;
+                if (Left < vsLeft || Top < vsTop || Left + Width > vsRight || Top + Height > vsBottom)
+                {
+                    Left = work.Left + Math.Max(0, (work.Width - Width) / 2);
+                    Top = work.Top + Math.Max(0, (work.Height - Height) / 2);
+                }
+                if (settings0.WinWidth > 520) _noteWindowWidth = settings0.WinWidth;
+            }
+            else
+            {
+                Width = Math.Max(MinWidth, Math.Min(Width, work.Width - 60));
+                Height = Math.Max(MinHeight, Math.Min(Height, work.Height - 48));
+                Left = work.Left + (work.Width - Width) / 2;
+                Top = work.Top + (work.Height - Height) / 2;
+            }
 
             _clipboard = new ClipboardService(store);
             _clipboard.Captured += _ =>
@@ -93,6 +127,10 @@ namespace Cooopy
             };
 
             _store.SaveFailed += OnSaveFailed;
+
+            // 剪贴板服务的提示（复制失败、身份证号被打码）统一转成 toast。
+            _clipboard.Suppressed += message =>
+                Dispatcher.BeginInvoke(new Action(() => ShowToast(message)));
 
             _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.2) };
             _toastTimer.Tick += (_, _) =>
@@ -109,6 +147,17 @@ namespace Cooopy
                 _searchTimer.Stop();
                 if (_initialized) RefreshRecords();
             };
+
+            // 私密记录的解锁会话到期后，把列表重新打回掩码状态。
+            _lockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+            _lockTimer.Tick += (_, _) =>
+            {
+                var unlockedNow = PrivacyGate.IsUnlocked;
+                if (unlockedNow == _wasUnlocked) return;
+                _wasUnlocked = unlockedNow;
+                if (_initialized) RefreshRecords();
+            };
+            _lockTimer.Start();
 
             // 暂停 30 分钟到期后自动恢复界面/托盘状态。
             _pauseTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
@@ -136,6 +185,12 @@ namespace Cooopy
                 FilterPopup.IsOpen = false;
             };
             IsVisibleChanged += (_, _) => { if (!IsVisible && FilterPopup != null) FilterPopup.IsOpen = false; };
+            // 笔记模式下用户手动调宽窗口时同步记忆值，避免后续 ApplyUiMode 把宽度拽回去。
+            SizeChanged += (_, _) =>
+            {
+                if (_appliedUiMode == "note" && WindowState == WindowState.Normal)
+                    _noteWindowWidth = Width;
+            };
             Loaded += (_, _) => { if (!_initialized) InitServices(); };
         }
 
@@ -175,6 +230,24 @@ namespace Cooopy
 
         private void MaxButton_Click(object sender, RoutedEventArgs e) => ToggleMaximize();
 
+        private void TopMostButton_Click(object sender, RoutedEventArgs e) =>
+            ApplyAlwaysOnTop(!Topmost, persist: true);
+
+        /// <summary>切换主界面窗口置顶，并同步标题栏按钮的激活外观。</summary>
+        private void ApplyAlwaysOnTop(bool on, bool persist)
+        {
+            Topmost = on;
+            if (TopMostButton != null)
+            {
+                TopMostButton.Foreground = on
+                    ? TryFindResource("Accent") as Brush ?? Brushes.DodgerBlue
+                    : TryFindResource("TextSecondary") as Brush ?? Brushes.Gray;
+                TopMostButton.ToolTip = on ? "取消窗口置顶" : "窗口置顶";
+            }
+            if (persist)
+                _store.UpdateSettings(s => s.AlwaysOnTop = on);
+        }
+
         private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
         private void ToggleMaximize() =>
@@ -213,6 +286,10 @@ namespace Cooopy
                 App.Log("InitServices: hwnd=" + _hwnd);
                 _source = HwndSource.FromHwnd(_hwnd);
                 _source?.AddHook(WndProc);
+                // Explorer 重启后任务栏重建，托盘图标会被一并清掉，需重新显示。
+                _taskbarCreatedMsg = (int)Native.RegisterWindowMessage("TaskbarCreated");
+                // 系统注销/关机：直接走真退出，确保托盘图标被清理。
+                Application.Current.SessionEnding += (_, _) => _sessionEnding = true;
 
                 _clipboard.Attach(_hwnd);
 
@@ -277,6 +354,10 @@ namespace Cooopy
                     if (id == HotkeyService.IdMain) ToggleMainWindow();
                     else if (id == HotkeyService.IdSave) ShowTagPopupFromClipboard();
                     break;
+                default:
+                    if (_taskbarCreatedMsg != 0 && msg == _taskbarCreatedMsg)
+                        _tray?.EnsureVisible();
+                    break;
             }
 
             return IntPtr.Zero;
@@ -285,6 +366,8 @@ namespace Cooopy
         private void Window_Closing(object sender, CancelEventArgs e)
         {
             if (_exiting) return;
+            // 系统注销/关机时必须真退出并清理托盘，否则被系统硬杀会留下幽灵图标。
+            if (_sessionEnding) return;
             if (_store.Data.Settings.CloseToTray)
             {
                 e.Cancel = true;
@@ -309,6 +392,25 @@ namespace Cooopy
             try
             {
                 _store.FlushPending();
+            }
+            catch
+            {
+                // ignored
+            }
+
+            // 记住窗口位置/尺寸（卡片模式 360 宽是固定值，同样记录）。
+            try
+            {
+                if (WindowState == WindowState.Normal && !double.IsNaN(Left) && Width > 0)
+                {
+                    _store.UpdateSettings(s0 =>
+                    {
+                        s0.WinLeft = Left;
+                        s0.WinTop = Top;
+                        s0.WinWidth = Width;
+                        s0.WinHeight = Height;
+                    });
+                }
             }
             catch
             {
@@ -388,13 +490,45 @@ namespace Cooopy
                 ShowToast("Win 键组合已不再支持，已恢复默认快捷键");
             }
 
-            (bool ok, string error) main = _hotkeys.Apply(HotkeyService.IdMain, settings.HotkeyMain);
-            (bool ok, string error) save = _hotkeys.Apply(HotkeyService.IdSave, settings.HotkeySave);
+            (bool ok, string error) main = (true, null);
+            if (settings.HotkeyMainEnabled) main = _hotkeys.Apply(HotkeyService.IdMain, settings.HotkeyMain);
+            else _hotkeys.Disable(HotkeyService.IdMain);
 
-            App.Log($"hotkeys: main={settings.HotkeyMain}/{main.ok} save={settings.HotkeySave}/{save.ok}");
+            (bool ok, string error) save = (true, null);
+            if (settings.HotkeySaveEnabled) save = _hotkeys.Apply(HotkeyService.IdSave, settings.HotkeySave);
+            else _hotkeys.Disable(HotkeyService.IdSave);
 
-            if (!main.ok) ShowToast(main.error);
-            else if (!save.ok) ShowToast(save.error);
+            App.Log($"hotkeys: main={settings.HotkeyMain}/{main.ok}/enabled={settings.HotkeyMainEnabled} " +
+                    $"save={settings.HotkeySave}/{save.ok}/enabled={settings.HotkeySaveEnabled}");
+
+            if (settings.HotkeyMainEnabled && !main.ok) ShowToast(main.error);
+            else if (settings.HotkeySaveEnabled && !save.ok) ShowToast(save.error);
+        }
+
+        private void HotkeyEnabled_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_loadingSettings) return;
+            UpdateHotkeyEnableUi();
+            PersistSettings();
+            ApplyHotkeys();
+        }
+
+        private void UpdateHotkeyEnableUi()
+        {
+            var mainEnabled = ChkHotkeyMainEnabled?.IsChecked == true;
+            var saveEnabled = ChkHotkeySaveEnabled?.IsChecked == true;
+
+            if (HotkeyMainBox != null) HotkeyMainBox.IsEnabled = mainEnabled;
+            if (HotkeyMainResetButton != null) HotkeyMainResetButton.IsEnabled = mainEnabled;
+            if (HotkeySaveBox != null) HotkeySaveBox.IsEnabled = saveEnabled;
+            if (HotkeySaveResetButton != null) HotkeySaveResetButton.IsEnabled = saveEnabled;
+
+            // 关掉开关时，如果输入框正在录制，结束录制状态。
+            if (!mainEnabled && HotkeyMainBox != null && HotkeyMainBox.IsKeyboardFocusWithin)
+                Keyboard.ClearFocus();
+            if (!saveEnabled && HotkeySaveBox != null && HotkeySaveBox.IsKeyboardFocusWithin)
+                Keyboard.ClearFocus();
+            UpdateHotkeyHook();
         }
 
         /// <summary>组合键是否还能被注册：必须带 Ctrl / Shift / Alt，且不含 Win。</summary>
@@ -414,11 +548,17 @@ namespace Cooopy
         /// </summary>
         private void UpdateHotkeyHook()
         {
-            var recording = HotkeyMainBox != null && HotkeyMainBox.IsKeyboardFocusWithin ||
-                            HotkeySaveBox != null && HotkeySaveBox.IsKeyboardFocusWithin;
+            var recordingMain = HotkeyMainBox != null && HotkeyMainBox.IsKeyboardFocusWithin;
+            var recordingSave = HotkeySaveBox != null && HotkeySaveBox.IsKeyboardFocusWithin;
+            var recording = recordingMain || recordingSave;
 
             if (recording)
             {
+                // 暂时注销正在录制的那个热键：否则按“当前组合”想重新录制时，
+                // 全局热键会先触发（打开主窗口/取词弹窗），把录制打断。
+                if (recordingMain) _hotkeys.Disable(HotkeyService.IdMain);
+                if (recordingSave) _hotkeys.Disable(HotkeyService.IdSave);
+
                 if (_hotkeyHook != IntPtr.Zero) return;
                 ResetHotkeyModifierState();
                 _hotkeyHookProc = HotkeyHookCallback;
@@ -433,6 +573,8 @@ namespace Cooopy
                 Native.UnhookWindowsHookEx(_hotkeyHook);
                 _hotkeyHook = IntPtr.Zero;
                 _hotkeyHookProc = null;
+                // 离开录制：按当前设置恢复注册（录了新组合就生效，没录就恢复原组合）。
+                ApplyHotkeys();
             }
         }
 
@@ -546,17 +688,24 @@ namespace Cooopy
             var result = _hotkeys.Apply(id, combo);
             if (!result.ok)
             {
+                App.Log($"hotkey record failed: {id} {combo} - {result.error}");
                 ShowToast(result.error);
                 return;
             }
 
             box.Text = combo;
+            App.Log($"hotkey recorded: {id} = {combo}");
             _store.UpdateSettings(s =>
             {
                 if (isMain) s.HotkeyMain = combo;
                 else s.HotkeySave = combo;
             });
             ShowToast("快捷键已更新为 " + combo);
+
+            // 录制成功后立刻把焦点移出输入框：录制钩子还挂着时会吞掉所有按键，
+            // 用户紧接着按新快捷键会被当成“再次录制”而不是触发热键，
+            // 看起来就是“要在外面点一下才生效”。移出焦点 = 钩子卸载 = 立即可用。
+            box.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
         }
 
         // 低级键盘钩子不可用时的兜底：普通 WPF 按键事件（不含 Win 键）。
@@ -591,23 +740,160 @@ namespace Cooopy
         }
 
         /// <summary>
-        /// “cooopy 到剪贴板”快捷键：只读剪贴板，不模拟任何按键。
-        /// 弹窗里就是剪贴板现有的文本；剪贴板没有文本时弹窗照样出现，文本框空置可直接输入。
-        /// 想存选中的文字，先按一次 Ctrl+C（这一步本身就会被自动收录），再按快捷键打标签即可。
+        /// “cooopy 到剪贴板”快捷键：效果等同帮用户按了一次 Ctrl+C，然后弹出打标签窗口。
+        ///   有选中文字 → 选中内容进剪贴板，弹窗带入这段文字；
+        ///   没选中 → 剪贴板不变，弹窗带入剪贴板现有文本；
+        ///   剪贴板也没有文本 → 照样弹窗，文本框空置，可直接输入。
+        /// 两种情况不合成按键：
+        ///   传统控制台（cmd/conhost）——那里 Ctrl+C 是“中断”，会打断正在跑的命令；
+        ///   管理员窗口——UIPI 会静默丢弃普通进程合成的按键，发了也白发。
+        /// 两种情况都退化为只读剪贴板。
         /// </summary>
-        private void ShowTagPopupFromClipboard()
+        private bool _captureInFlight;
+
+        private async void ShowTagPopupFromClipboard()
         {
+            if (_captureInFlight) return; // 连按快捷键时忽略上一轮还没完成的取词
+            _captureInFlight = true;
+            var started = Stopwatch.StartNew();
             try
             {
-                var text = ClipboardService.ReadClipboardText() ?? string.Empty;
+                var fgStart = WindowClassOf(Native.GetForegroundWindow());
+                var previous = ClipboardService.ReadClipboardText() ?? string.Empty;
                 Native.GetCursorPos(out var point);
-                ShowTagPopupInternal(text, point);
-                App.Log($"hotkey popup: len={text.Length}");
+
+                // 弹窗不抢焦点（WS_EX_NOACTIVATE），目标程序的焦点和选中状态都保持原样，
+                // 所以先立即弹窗（填当前剪贴板内容），复制选中在后台进行，拿到后更新弹窗。
+                ShowTagPopupInternal(previous, point);
+
+                var foreground = Native.GetForegroundWindow();
+                var ownForeground = IsOwnWindow(foreground);
+                if (!ownForeground) _lastTargetWindow = foreground;
+
+                var hwnd = ownForeground && _lastTargetWindow != IntPtr.Zero && Native.IsWindow(_lastTargetWindow)
+                    ? _lastTargetWindow
+                    : foreground;
+                var console = IsLegacyConsole(hwnd);
+                var elevated = Native.IsForegroundElevated(hwnd, out _);
+                var fgClass = WindowClassOf(hwnd);
+
+                if (console || elevated)
+                {
+                    // 传统控制台（Ctrl+C 是中断）/ 管理员窗口（UIPI 拦截按键与消息）：
+                    // 不做任何复制尝试，弹窗保留剪贴板现有内容。
+                    if (elevated && !console)
+                        ShowToast("该窗口以管理员运行，无法自动复制选中文字");
+                    App.Log($"hotkey popup: copied=False, skipped, console={console}, elevated={elevated}, " +
+                            $"fg='{fgClass}', elapsed={started.ElapsedMilliseconds}ms");
+                    return;
+                }
+
+                // 连续取词：弹窗开着时若用户点过弹窗内部，焦点在 cooopy 自己这里，
+                // 复制要发给上次的目标窗口，先把焦点还回去。
+                if (ownForeground && _lastTargetWindow != IntPtr.Zero && Native.IsWindow(_lastTargetWindow))
+                {
+                    Native.SetForegroundWindow(_lastTargetWindow);
+                    for (var i = 0; i < 10; i++)
+                    {
+                        await Task.Delay(30);
+                        if (Native.GetForegroundWindow() == _lastTargetWindow) break;
+                    }
+                }
+
+                var sequence = Native.GetClipboardSequenceNumber();
+                var copied = false;
+
+                // 快路径：WM_COPY 是窗口消息不是按键，不受按着的修饰键影响，立即生效。
+                Native.CopyFromFocusedWindow();
+                for (var i = 0; i < 8; i++)
+                {
+                    await Task.Delay(10);
+                    if (Native.GetClipboardSequenceNumber() != sequence)
+                    {
+                        copied = true;
+                        break;
+                    }
+                }
+
+                // 兜底：等修饰键松开（最多 300ms）后合成按键（覆盖不响应 WM_COPY 的程序）。
+                // 修饰键没松开就绝不合成：用户按着 Alt 时合成 Ctrl+C 会变成 Ctrl+Alt+C，
+                // 正好命中“显示主界面”的全局热键，导致主界面被意外召唤。
+                if (!copied)
+                {
+                    var modifiersReleased = false;
+                    for (var i = 0; i < 12; i++)
+                    {
+                        if (!Native.IsKeyDown(Native.VK_CONTROL) &&
+                            !Native.IsKeyDown(Native.VK_MENU) &&
+                            !Native.IsKeyDown(Native.VK_SHIFT) &&
+                            !Native.IsKeyDown(Native.VK_LWIN) &&
+                            !Native.IsKeyDown(Native.VK_RWIN))
+                        {
+                            modifiersReleased = true;
+                            break;
+                        }
+                        await Task.Delay(25);
+                    }
+                    if (modifiersReleased)
+                    {
+                        // SendCtrlC 内部有按键间隔 Sleep，放到线程池执行，避免阻塞 UI 线程。
+                        await Task.Run(Native.SendCtrlC);
+                        for (var i = 0; i < 10; i++)
+                        {
+                            await Task.Delay(10);
+                            if (Native.GetClipboardSequenceNumber() != sequence)
+                            {
+                                copied = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (copied)
+                {
+                    var text = ClipboardService.ReadClipboardText() ?? string.Empty;
+                    _popup?.UpdateTextIfUntouched(text);
+                }
+                App.Log($"hotkey popup: copied={copied}, console={console}, elevated={elevated}, " +
+                        $"fg='{fgClass}', elapsed={started.ElapsedMilliseconds}ms");
             }
             catch (Exception ex)
             {
-                ShowToast("打开弹窗失败：" + ex.Message);
+                App.Log("hotkey capture failed: " + ex);
+                ShowToast("取词失败：" + ex.Message);
             }
+            finally
+            {
+                _captureInFlight = false;
+            }
+        }
+
+        private static bool IsOwnWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            Native.GetWindowThreadProcessId(hwnd, out var pid);
+            return pid == (uint)Environment.ProcessId;
+        }
+
+        /// <summary>
+        /// 前台窗口是否为传统控制台（conhost）。Windows Terminal（CASCADIA_HOSTING_WINDOW_CLASS）
+        /// 在有选中时 Ctrl+C 本来就是复制，不在此列。
+        /// </summary>
+        private static bool IsLegacyConsole(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            var sb = new System.Text.StringBuilder(64);
+            _ = Native.GetClassName(hwnd, sb, sb.Capacity);
+            return string.Equals(sb.ToString(), "ConsoleWindowClass", StringComparison.Ordinal);
+        }
+
+        private static string WindowClassOf(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return "<null>";
+            var sb = new System.Text.StringBuilder(64);
+            _ = Native.GetClassName(hwnd, sb, sb.Capacity);
+            return sb.ToString();
         }
 
         private void ShowTagPopupInternal(string text, Native.POINT point)
@@ -617,19 +903,84 @@ namespace Cooopy
                 .OrderByDescending(t => counts.TryGetValue(t.Id, out var c) ? c : 0)
                 .ToList();
 
+            // 超长文本会把弹窗文本框卡住数秒（实测 170 万字符 ≈ 7 秒），按设置上限截断显示。
+            var max = Math.Max(1000, _store.Data.Settings.MaxLength);
+            if (text != null && text.Length > max)
+            {
+                text = text[..max];
+                ShowToast("内容过长，弹窗内已截断显示");
+            }
+
+            // 弹窗里展示剪贴板原文：是否打码取决于保存时有没有勾“私密”，
+            // 所以这里不预先打码，交给 HandleQuickSave 决定。
+
             // 复用同一个弹窗实例：窗口和模板只创建一次，后续取词弹窗会快很多。
             if (_popup == null)
             {
                 _popup = new TagPopupWindow();
                 _popup.Saved += (editedText, tagIds) => HandleQuickSave(editedText, tagIds);
+                _popup.Hidden += StopPopupMouseHook;
+                _popup.Closed += (_, _) => StopPopupMouseHook();
             }
 
             _popup.Reset(text, tags, _store.Data.Settings.QuickTagAutoSave);
             _popup.ShowAtScreenPoint(point);
+            StartPopupMouseHook();
+        }
+
+        // ---- 弹窗外部点击监视：弹窗不抢焦点后，Deactivated 不再触发，
+        // ---- 改用低级鼠标钩子判断“点在弹窗外面”，驱动自动保存/关闭。
+
+        private IntPtr _popupMouseHook;
+        private Native.HookProc _popupMouseHookProc;
+
+        private void StartPopupMouseHook()
+        {
+            if (_popupMouseHook != IntPtr.Zero) return;
+            _popupMouseHookProc = PopupMouseHookCallback;
+            _popupMouseHook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, _popupMouseHookProc,
+                Native.GetModuleHandle(null), 0);
+        }
+
+        private void StopPopupMouseHook()
+        {
+            if (_popupMouseHook == IntPtr.Zero) return;
+            Native.UnhookWindowsHookEx(_popupMouseHook);
+            _popupMouseHook = IntPtr.Zero;
+            _popupMouseHookProc = null;
+        }
+
+        private IntPtr PopupMouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode >= 0)
+            {
+                var message = wParam.ToInt32();
+                if (message == Native.WM_LBUTTONDOWN || message == Native.WM_RBUTTONDOWN)
+                {
+                    var point = new Native.POINT();
+                    Native.GetCursorPos(out point);
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (_popup == null || !_popup.IsVisible) { StopPopupMouseHook(); return; }
+                        if (_popup.IsOutside(point)) _popup.OutsideClick();
+                    }));
+                }
+            }
+            return Native.CallNextHookEx(_popupMouseHook, nCode, wParam, lParam);
         }
 
         private void HandleQuickSave(string text, IList<string> tagIds)
         {
+            // 勾了“私密”就按用户意愿原样保存（私密记录本身就是靠验证保护全文）；
+            // 否则照常给身份证/银行卡打码，保证任何入口都不落明文。
+            var keepVerbatim = tagIds != null && tagIds.Any(BuiltinTags.IsPrivate);
+            if (!keepVerbatim && _store.Data.Settings.MaskIdCards)
+            {
+                text = SensitiveText.MaskAll(text, out var idCards, out var bankCards);
+                var notice = SensitiveText.DescribeMask(idCards, bankCards);
+                if (notice != null) ShowToast(notice);
+            }
+
             // AddRecord 对空文本 / 超长文本返回 null 且不产生记录，
             // 这里必须区分“没存进去”和“存进去了”，否则空弹窗点保存会假报“已添加”。
             if (string.IsNullOrWhiteSpace(text))
@@ -702,21 +1053,35 @@ namespace Cooopy
             if (ModeNoteRadio == null || RecordsBubbleList == null) return;
 
             var bubble = string.Equals(_store.Data.Settings.UiMode, "bubble", StringComparison.OrdinalIgnoreCase);
+            var modeKey = bubble ? "bubble" : "note";
+            // 只在模式真正切换时才调整窗口尺寸：ApplyUiMode 在每次设置变更时都会执行，
+            // 若无条件重设宽度，用户手动调过的窗口会被强行拉回，表现为内容反复“抽搐”。
+            var switching = _appliedUiMode != modeKey;
+            _appliedUiMode = modeKey;
+
             if (bubble)
             {
-                if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
-                if (Width > 520) _noteWindowWidth = Width;
+                if (switching)
+                {
+                    if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
+                    if (Width > 520) _noteWindowWidth = Width;
+                }
                 // Bubble mode uses one fixed width (the current minimum width).
                 MinWidth = 360;
                 MaxWidth = 360;
-                if (Math.Abs(Width - 360) > 0.5) Width = 360;
+                if (switching && Math.Abs(Width - 360) > 0.5) Width = 360;
             }
             else
             {
-                MaxWidth = double.PositiveInfinity;
-                MinWidth = 780;
-                if (_noteWindowWidth >= MinWidth && Math.Abs(Width - _noteWindowWidth) > 0.5)
-                    Width = _noteWindowWidth;
+                if (switching)
+                {
+                    // 先放宽 MaxWidth、再设 Width、最后收紧 MinWidth：
+                    // 若先设 MinWidth=780，窗口会被先钳到 780 再跳到目标宽度，出现两次回流。
+                    MaxWidth = double.PositiveInfinity;
+                    var target = Math.Max(_noteWindowWidth, 780);
+                    if (Math.Abs(Width - target) > 0.5) Width = target;
+                    MinWidth = 780;
+                }
             }
 
 
@@ -727,6 +1092,17 @@ namespace Cooopy
                 SettingsContent.Margin = bubble
                     ? new Thickness(14, 18, 14, 30)
                     : new Thickness(22, 18, 22, 30);
+                // 笔记模式下钉死内容列宽：AI 线路检查（切换后 900ms）会触发全局重排，
+                // 卡片里的换行提示文本可能被按旧约束重新测量，把整列内容拖窄一瞬；
+                // 固定宽度后子元素的期望宽度变化不再影响整列。
+                SettingsContent.Width = bubble ? double.NaN : 740;
+            }
+
+            // 卡片模式窗口窄，标题文字整体隐藏；笔记模式显示完整标题。
+            if (AppLogo != null)
+            {
+                AppLogo.Text = "cooopy";
+                AppLogo.Visibility = bubble ? Visibility.Collapsed : Visibility.Visible;
             }
 
             // Bubble mode uses compact icon-only top tabs.
@@ -815,6 +1191,9 @@ namespace Cooopy
                 var urgency = tagItems.FirstOrDefault(t =>
                     string.Equals(t.Kind, BuiltinTags.KindUrgency, StringComparison.Ordinal));
 
+                // 私密记录未解锁时只显示掩码：列表、气泡两种模式都走这里。
+                var locked = BuiltinTags.IsPrivate(record) && !PrivacyGate.IsUnlocked;
+
                 rows.Add(new RecordRow
                 {
                     Record = record,
@@ -824,7 +1203,9 @@ namespace Cooopy
                     UrgencyVisibility = urgency != null ? Visibility.Visible : Visibility.Collapsed,
                     TimeText = FormatTime(record.CreatedAt),
                     // 气泡模式用不到笔记模式的单行预览，不必为每条记录都压平文本
-                    Preview = bubble ? "" : FlattenPreview(record.Text),
+                    Preview = bubble ? "" : locked ? LockedPlaceholder : FlattenPreview(record.Text),
+                    DisplayText = locked ? LockedPlaceholder : record.Text,
+                    IsPrivateLocked = locked,
                     EditText = record.Text,
                 });
             }
@@ -904,10 +1285,40 @@ namespace Cooopy
                     return;
                 }
 
-                BeginInlineEdit(record);
+                _ = BeginEditWithGateAsync(record);
                 return;
             }
 
+            _ = OpenEditorWithGateAsync(record);
+        }
+
+        /// <summary>私密记录在未解锁时先过 Windows Hello，验证通过才允许查看/编辑/复制。</summary>
+        private async Task<bool> EnsurePrivateAccessAsync(RecordItem record)
+        {
+            if (record == null || !BuiltinTags.IsPrivate(record) || PrivacyGate.IsUnlocked) return true;
+
+            var (ok, error) = await PrivacyGate.VerifyAsync("查看 cooopy 中的私密记录");
+            if (!ok)
+            {
+                if (!string.IsNullOrEmpty(error)) ShowToast(error);
+                return false;
+            }
+
+            // 解锁后立刻重建列表，让掩码变回正文。
+            _wasUnlocked = true;
+            if (_initialized) RefreshRecords();
+            return true;
+        }
+
+        private async Task BeginEditWithGateAsync(RecordItem record)
+        {
+            if (!await EnsurePrivateAccessAsync(record)) return;
+            BeginInlineEdit(record);
+        }
+
+        private async Task OpenEditorWithGateAsync(RecordItem record)
+        {
+            if (!await EnsurePrivateAccessAsync(record)) return;
             OpenRecordEditor(record);
         }
 
@@ -1126,7 +1537,7 @@ namespace Cooopy
             {
                 _store.UpdateRecord(record, text, tagIds);
                 RefreshAll();
-                ShowToast("已保存修改");
+                ShowToast(BuiltinTags.IsPrivate(record) ? "已保存修改（私密）" : "已保存修改");
             };
             editor.Closed += (_, _) =>
             {
@@ -1136,13 +1547,15 @@ namespace Cooopy
             editor.Activate();
         }
 
-        private void RecordRow_RightClick(object sender, MouseButtonEventArgs e)
+        private async void RecordRow_RightClick(object sender, MouseButtonEventArgs e)
         {
             var record = RowRecord(sender);
             if (record == null) return;
+            e.Handled = true;
+            if (!await EnsurePrivateAccessAsync(record)) return;
+
             _clipboard.SetClipboardText(record.Text);
             ShowToast("已复制到剪贴板");
-            e.Handled = true;
         }
 
         private void RecordDelete_Click(object sender, RoutedEventArgs e)
@@ -1224,6 +1637,26 @@ namespace Cooopy
 
         // ------------------------------------------------------------- filters / search / sort
 
+        /// <summary>退出搜索：清空关键字、把键盘焦点还给窗口，列表恢复未过滤状态。</summary>
+        private void ExitSearch()
+        {
+            if (SearchBox == null) return;
+            var hadText = !string.IsNullOrEmpty(SearchBox.Text);
+            _searchTimer?.Stop();
+            SearchBox.Text = "";
+            // 把键盘焦点从搜索框移走：否则框仍处于激活态（占位符不显示），看起来"没退出"。
+            Keyboard.ClearFocus();
+            Focus();
+            UpdateSearchPlaceholder();
+            if (hadText && _initialized)
+            {
+                // 延迟到当前输入处理完成后刷新：重建列表不能发生在点击半路上，
+                // 否则被点的视觉元素被替换、本次点击会落空。
+                Dispatcher.BeginInvoke(new Action(RefreshRecords),
+                    System.Windows.Threading.DispatcherPriority.Input);
+            }
+        }
+
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             UpdateSearchPlaceholder();
@@ -1234,7 +1667,14 @@ namespace Cooopy
 
         private void SearchBox_GotFocus(object sender, KeyboardFocusChangedEventArgs e) => UpdateSearchPlaceholder();
 
-        private void SearchBox_LostFocus(object sender, KeyboardFocusChangedEventArgs e) => UpdateSearchPlaceholder();
+        private void SearchBox_LostFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            UpdateSearchPlaceholder();
+            // 失焦即退出搜索：覆盖真实鼠标点击任何可聚焦元素、Tab 切换等所有路径
+            //（窗口级 PreviewMouseDown 对"点击不可聚焦元素"才可靠，两者互补）。
+            if (_initialized && !string.IsNullOrEmpty(SearchBox.Text))
+                ExitSearch();
+        }
 
         private void UpdateSearchPlaceholder()
         {
@@ -1357,6 +1797,13 @@ namespace Cooopy
 
         private void Window_PreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
+            // 点击搜索框外：退出搜索（清空并失焦），不吞掉点击本身。
+            if ((SearchBox?.IsKeyboardFocused == true || !string.IsNullOrEmpty(SearchBox?.Text)) &&
+                !(e.OriginalSource is DependencyObject src && IsInside(src, SearchGrid)))
+            {
+                ExitSearch();
+            }
+
             if (!FilterPopup.IsOpen) return;
             // Clicks inside the popup itself must not close it.
             if (FilterPopup.Child is DependencyObject popupContent && IsInside(e.OriginalSource as DependencyObject, popupContent))
@@ -1941,6 +2388,7 @@ namespace Cooopy
                 ChkAutoStart.IsChecked = StartupService.IsEnabled();
                 ChkCloseToTray.IsChecked = settings.CloseToTray;
                 ChkStartMinimized.IsChecked = settings.StartMinimized;
+                ApplyAlwaysOnTop(settings.AlwaysOnTop, persist: false);
                 ChkQuickAutoSave.IsChecked = settings.QuickTagAutoSave;
                 ApiUrlBox.Text = settings.DeepSeekApiUrl ?? "";
                 ApiKeyBox.Text = settings.DeepSeekApiKey ?? "";
@@ -1950,9 +2398,13 @@ namespace Cooopy
                 ModeBubbleRadio.IsChecked = bubbleMode;
                 ModeNoteRadio.IsChecked = !bubbleMode;
                 ChkAutoCapture.IsChecked = settings.AutoCapture;
+                ChkMaskIdCards.IsChecked = settings.MaskIdCards;
                 MaxLengthBox.Text = settings.MaxLength.ToString();
                 HotkeyMainBox.Text = settings.HotkeyMain;
                 HotkeySaveBox.Text = settings.HotkeySave;
+                ChkHotkeyMainEnabled.IsChecked = settings.HotkeyMainEnabled;
+                ChkHotkeySaveEnabled.IsChecked = settings.HotkeySaveEnabled;
+                UpdateHotkeyEnableUi();
 
                 DedupeCombo.SelectedIndex = settings.DedupeMinutes switch
                 {
@@ -2129,6 +2581,9 @@ namespace Cooopy
                 settings.AdvancedEnabled = ChkAdvancedEnabled.IsChecked == true;
                 settings.UiMode = ModeBubbleRadio.IsChecked == true ? "bubble" : "note";
                 settings.AutoCapture = ChkAutoCapture.IsChecked == true;
+                settings.MaskIdCards = ChkMaskIdCards.IsChecked == true;
+                settings.HotkeyMainEnabled = ChkHotkeyMainEnabled.IsChecked == true;
+                settings.HotkeySaveEnabled = ChkHotkeySaveEnabled.IsChecked == true;
                 settings.MaxLength = maxLength;
                 settings.DedupeMinutes = dedupe;
             });
@@ -2274,7 +2729,9 @@ namespace Cooopy
             try
             {
                 _store.ExportJson(dialog.FileName);
-                ShowToast("已导出 JSON");
+                ShowToast(_store.LastExportSkipped > 0
+                    ? $"已导出 JSON，跳过 {_store.LastExportSkipped} 条私密记录"
+                    : "已导出 JSON");
             }
             catch (Exception ex)
             {
@@ -2294,7 +2751,9 @@ namespace Cooopy
             try
             {
                 _store.ExportMarkdown(dialog.FileName);
-                ShowToast("已导出 Markdown");
+                ShowToast(_store.LastExportSkipped > 0
+                    ? $"已导出 Markdown，跳过 {_store.LastExportSkipped} 条私密记录"
+                    : "已导出 Markdown");
             }
             catch (Exception ex)
             {
@@ -2417,16 +2876,19 @@ namespace Cooopy
                     FilterPopup.IsOpen = false;
                     e.Handled = true;
                 }
+                else if ((SearchBox?.IsKeyboardFocused == true || !string.IsNullOrEmpty(SearchBox?.Text)) &&
+                         Keyboard.FocusedElement is TextBox)
+                {
+                    // 搜索中按 Esc：退出搜索，不隐藏主界面
+                    ExitSearch();
+                    e.Handled = true;
+                }
                 else if (Keyboard.FocusedElement is TextBox box && !string.IsNullOrEmpty(box.Text))
                 {
                     box.Clear();
                     e.Handled = true;
                 }
-                else if (Keyboard.Modifiers == ModifierKeys.None)
-                {
-                    Hide();
-                    e.Handled = true;
-                }
+                // 其余情况 Esc 不做任何事（尤其不再隐藏主界面）
             }
         }
 

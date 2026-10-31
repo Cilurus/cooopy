@@ -55,14 +55,17 @@ namespace Cooopy.Services
         }
 
         /// <summary>Called from the window proc when WM_CLIPBOARDUPDATE arrives.</summary>
-        public void OnClipboardUpdate()
-        {
+        public void OnClipboardUpdate()        {
             var sequence = Native.GetClipboardSequenceNumber();
             if (sequence == _lastSequence) return;
             _lastSequence = sequence;
 
             var text = ReadClipboardText();
             if (string.IsNullOrEmpty(text)) return;
+
+            // 前台是 cooopy 自己时不收录：否则在编辑框/弹窗里 Ctrl+C 复制私密正文，
+            // 会立刻生成一条没有私密标签的明文新记录。
+            if (IsForegroundOwnProcess()) return;
 
             // Ignore writes performed by cooopy itself.
             if (_lastKnownText != null && text == _lastKnownText) return;
@@ -76,8 +79,26 @@ namespace Cooopy.Services
             // 不应影响恢复后再次复制同一段文字。
             _lastKnownText = text;
 
-            var record = _store.AddRecord(text);
+            // 入库前按需给身份证/银行卡打码：磁盘上不留完整号码。
+            var stored = text;
+            if (settings.MaskIdCards)
+            {
+                stored = SensitiveText.MaskAll(text, out var idCards, out var bankCards);
+                var notice = SensitiveText.DescribeMask(idCards, bankCards);
+                if (notice != null) Suppressed?.Invoke(notice);
+            }
+
+            var record = _store.AddRecord(stored);
             if (record != null) Captured?.Invoke(record);
+        }
+
+        /// <summary>前台窗口是否属于 cooopy 自己（含标签弹窗等）。</summary>
+        private static bool IsForegroundOwnProcess()
+        {
+            var hwnd = Native.GetForegroundWindow();
+            if (hwnd == IntPtr.Zero) return false;
+            Native.GetWindowThreadProcessId(hwnd, out var pid);
+            return pid == (uint)Environment.ProcessId;
         }
     }
 }

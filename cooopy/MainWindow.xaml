@@ -24,7 +24,7 @@
 
     <Window.Resources>
         <DataTemplate x:Key="RecordBubbleTemplate">
-            <Grid x:Name="BubbleRoot" Margin="14,12,16,14"
+            <Grid x:Name="BubbleRoot" Margin="14,8,16,9"
                   UseLayoutRounding="True" SnapsToDevicePixels="True">
                 <!-- separate shadow layers keep text crisp -->
                 <!-- 环境阴影：四周均匀扩散，保证卡片上方也有一圈淡淡的阴影。
@@ -100,6 +100,14 @@
                                       Visibility="{Binding PinVisibility}"
                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                       StrokeLineJoin="Round" />
+                                <!-- 私密标记：眼睛带斜杠 -->
+                                <Path Data="{StaticResource EyeOffGlyph}"
+                                      Stroke="{StaticResource TextSecondary}" StrokeThickness="1.4"
+                                      Fill="Transparent" Width="11" Height="11"
+                                      Stretch="Uniform" Margin="0,0,7,0" VerticalAlignment="Center"
+                                      Visibility="{Binding LockVisibility}"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round" />
                                 <TextBlock Text="{Binding TimeText}" FontSize="12.5"
                                            Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" />
                             </StackPanel>
@@ -113,7 +121,7 @@
                                 Background="{StaticResource Surface}" ClipToBounds="True">
                             <Grid>
                                 <!-- 收起：最大 3 行（55.3 = 3 × 18.42），只读、不接收鼠标/焦点，滚轮仍归列表 -->
-                                <TextBox x:Name="BubbleTextView" Text="{Binding Record.Text}"
+                                <TextBox x:Name="BubbleTextView" Text="{Binding DisplayText}"
                                          Style="{StaticResource Input}" BorderThickness="0"
                                          Background="Transparent" Padding="0" MinHeight="0" MaxHeight="55.3"
                                          AcceptsReturn="True" TextWrapping="Wrap" FontSize="14.5"
@@ -186,6 +194,19 @@
                                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                                   StrokeLineJoin="Round" />
                                         </Grid>
+
+                                        <!-- 默认标签：私密小球（眼睛带斜杠） -->
+                                        <Grid x:Name="PrivateRoot" Width="25" Height="25" Visibility="Collapsed">
+                                            <Ellipse x:Name="PrivateRing" Fill="{StaticResource Surface}"
+                                                     Stroke="{Binding Tag.DotBrush}" StrokeThickness="1.2" />
+                                            <Path x:Name="PrivateIcon" Data="{StaticResource EyeOffGlyph}"
+                                                  Stroke="{Binding Tag.DotBrush}" StrokeThickness="1.4"
+                                                  Fill="Transparent" Width="14" Height="14"
+                                                  Stretch="Uniform" HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                  StrokeLineJoin="Round" />
+                                        </Grid>
                                     </Grid>
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding Tag.Kind}" Value="urgency">
@@ -197,6 +218,11 @@
                                             <Setter TargetName="ChipOff" Property="Visibility" Value="Collapsed" />
                                             <Setter TargetName="ChipOn" Property="Visibility" Value="Collapsed" />
                                             <Setter TargetName="PinRoot" Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Tag.Kind}" Value="private">
+                                            <Setter TargetName="ChipOff" Property="Visibility" Value="Collapsed" />
+                                            <Setter TargetName="ChipOn" Property="Visibility" Value="Collapsed" />
+                                            <Setter TargetName="PrivateRoot" Property="Visibility" Value="Visible" />
                                         </DataTrigger>
                                         <MultiDataTrigger>
                                             <MultiDataTrigger.Conditions>
@@ -214,6 +240,16 @@
                                             <Setter TargetName="PinRing" Property="Fill" Value="{StaticResource Accent}" />
                                             <Setter TargetName="PinRing" Property="Stroke" Value="{StaticResource Accent}" />
                                             <Setter TargetName="PinIcon" Property="Stroke" Value="White" />
+                                        </MultiDataTrigger>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsSelected}" Value="True" />
+                                                <Condition Binding="{Binding Tag.Kind}" Value="private" />
+                                            </MultiDataTrigger.Conditions>
+                                            <!-- 私密选中后的配色与置顶一致：Accent 实心 + 白色图标 -->
+                                            <Setter TargetName="PrivateRing" Property="Fill" Value="{StaticResource Accent}" />
+                                            <Setter TargetName="PrivateRing" Property="Stroke" Value="{StaticResource Accent}" />
+                                            <Setter TargetName="PrivateIcon" Property="Stroke" Value="White" />
                                         </MultiDataTrigger>
                                         <MultiDataTrigger>
                                             <MultiDataTrigger.Conditions>
@@ -278,6 +314,13 @@
                               Stroke="{StaticResource Accent}" StrokeThickness="1.6" Fill="Transparent"
                               Width="10" Height="10" Stretch="Uniform" Margin="0,0,8,0"
                               VerticalAlignment="Center" Visibility="{Binding PinVisibility}"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round" />
+                        <!-- 私密标记：眼睛带斜杠 -->
+                        <Path DockPanel.Dock="Left" Data="{StaticResource EyeOffGlyph}"
+                              Stroke="{StaticResource TextSecondary}" StrokeThickness="1.4" Fill="Transparent"
+                              Width="11" Height="11" Stretch="Uniform" Margin="0,0,8,0"
+                              VerticalAlignment="Center" Visibility="{Binding LockVisibility}"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               StrokeLineJoin="Round" />
                         <TextBlock Text="{Binding Preview}"
@@ -387,6 +430,16 @@
                               Visibility="Collapsed"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               StrokeLineJoin="Round" />
+                        <!-- 私密：眼睛带斜杠的小球 -->
+                        <Ellipse x:Name="PrivateRing" Fill="{StaticResource Surface}"
+                                 Stroke="{Binding Tag.DotBrush}" StrokeThickness="1.2" Visibility="Collapsed" />
+                        <Path x:Name="PrivateIcon" Data="{StaticResource EyeOffGlyph}"
+                              Stroke="{Binding Tag.DotBrush}" StrokeThickness="1.4" Fill="Transparent"
+                              Width="14" Height="14" Stretch="Uniform"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Visibility="Collapsed"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round" />
                     </Grid>
                     <TextBlock Text="{Binding CountText}" FontSize="13"
                                Foreground="{StaticResource TextMuted}" Margin="10,0,0,0"
@@ -400,6 +453,10 @@
                 <DataTrigger Binding="{Binding Tag.Kind}" Value="pin">
                     <Setter TargetName="PinRing" Property="Visibility" Value="Visible" />
                     <Setter TargetName="PinIcon" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Tag.Kind}" Value="private">
+                    <Setter TargetName="PrivateRing" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="PrivateIcon" Property="Visibility" Value="Visible" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -436,7 +493,7 @@
                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
                               StrokeThickness="1.2" Fill="Transparent"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                              Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center"
                               Visibility="Collapsed" />
                         <TextBlock x:Name="NavRecordsText" Text="记录" VerticalAlignment="Center" />
                     </StackPanel>
@@ -449,7 +506,7 @@
                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
                               StrokeThickness="1.2" Fill="Transparent"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                              Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center"
                               Visibility="Collapsed" />
                         <TextBlock x:Name="NavTagsText" Text="标签" VerticalAlignment="Center" />
                     </StackPanel>
@@ -464,7 +521,7 @@
                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
                               StrokeThickness="1.2" Fill="Transparent"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                              Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center"
                               Visibility="Collapsed" />
                         <TextBlock x:Name="NavSettingsText" Text="设置" VerticalAlignment="Center" />
                     </StackPanel>
@@ -477,6 +534,18 @@
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
                         Margin="0,0,10,0">
+                <Button x:Name="TopMostButton" Style="{StaticResource WindowButton}"
+                        Click="TopMostButton_Click" ToolTip="窗口置顶">
+                    <Path Data="{StaticResource PushpinGlyph}"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="1.3" Fill="Transparent" Width="15" Height="15" Stretch="Uniform"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                          RenderTransformOrigin="0.5,0.5">
+                        <Path.RenderTransform>
+                            <RotateTransform Angle="45" />
+                        </Path.RenderTransform>
+                    </Path>
+                </Button>
                 <Button Style="{StaticResource WindowButton}" Click="MinButton_Click" ToolTip="最小化">
                     <Path Data="M 2 7 H 12" Width="14" Height="14" Stretch="Uniform"
                           Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
@@ -537,12 +606,12 @@
                                 Click="SortButton_Click">
                             <Grid Width="12" Height="12">
                                 <Path x:Name="SortDescIcon"
-                                      Data="M 3 9 L 8 4 L 13 9 M 3 14 L 8 9 L 13 14"
+                                      Data="M 3 3 L 8 8 L 13 3 M 3 8 L 8 13 L 13 8"
                                       Stroke="{StaticResource TextSecondary}" StrokeThickness="1.3"
                                       Fill="Transparent" StrokeStartLineCap="Round"
                                       StrokeEndLineCap="Round" StrokeLineJoin="Round" Stretch="Uniform" />
                                 <Path x:Name="SortAscIcon"
-                                      Data="M 3 3 L 8 8 L 13 3 M 3 8 L 8 13 L 13 8"
+                                      Data="M 3 9 L 8 4 L 13 9 M 3 14 L 8 9 L 13 14"
                                       Stroke="{StaticResource TextSecondary}" StrokeThickness="1.3"
                                       Fill="Transparent" StrokeStartLineCap="Round"
                                       StrokeEndLineCap="Round" StrokeLineJoin="Round" Stretch="Uniform"
@@ -740,49 +809,47 @@
                 <StackPanel x:Name="SettingsContent" Margin="22,18,22,30" MaxWidth="740" HorizontalAlignment="Center">
 
                     <!-- general -->
-                    <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,14">
+                    <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,9">
                         <StackPanel>
                             <TextBlock Text="常规" FontSize="16.5" FontWeight="SemiBold" Margin="0,0,0,4" />
                             <StackPanel Orientation="Horizontal">
                                 <RadioButton x:Name="ModeNoteRadio" Style="{StaticResource OptionRadio}"
                                              Content="笔记模式" GroupName="uiMode" Checked="ModeRadio_Checked" />
                                 <RadioButton x:Name="ModeBubbleRadio" Style="{StaticResource OptionRadio}"
-                                             Content="气泡模式" GroupName="uiMode" Margin="28,5,0,5"
+                                             Content="卡片模式" GroupName="uiMode" Margin="28,5,0,5"
                                              Checked="ModeRadio_Checked" />
                             </StackPanel>
 
                             <Border Height="1" Background="{StaticResource Line}" Margin="0,6,0,4" />
 
-                            <CheckBox x:Name="ChkAutoStart" Content="开机自动启动（登录后静默运行）"
+                            <CheckBox x:Name="ChkAutoStart" Content="开机自动启动"
                                       Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click" />
                             <CheckBox x:Name="ChkCloseToTray" Content="关闭窗口时最小化到托盘"
                                       Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click" />
                             <CheckBox x:Name="ChkStartMinimized" Content="手动启动时隐藏主窗口"
                                       Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click" />
-                            <CheckBox x:Name="ChkQuickAutoSave" Content="快速打标签：点击窗口外自动保存"
+                            <CheckBox x:Name="ChkQuickAutoSave" Content="点击cooopy剪贴板外，自动关闭并保存"
                                       Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click" />
-                            <CheckBox x:Name="ChkAutoCapture"
-                                      Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="监测剪贴板" VerticalAlignment="Center" />
-                                    <!-- “监测剪贴板”后面的黄色点：表示重要 -->
-                                    <Ellipse Width="11" Height="11" Fill="#F2A93B" ToolTip="重要"
-                                             Margin="7,1,0,0" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </CheckBox>
+                            <CheckBox x:Name="ChkAutoCapture" Content="持续监控剪贴板*"
+                                      Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click" />
+                            <CheckBox x:Name="ChkMaskIdCards" Content="给身份证 / 银行卡打码破坏后入库"
+                                      Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click"
+                                      ToolTip="复制含证件号的内容时自动打码：身份证保留前 6 后 4（110105********002X），银行卡保留前 4 后 4。勾了「私密」标签的记录按原文保存" />
                         </StackPanel>
                     </Border>
 
                     <!-- hotkeys -->
-                    <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,14">
+                    <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,9">
                         <StackPanel>
                             <TextBlock Text="快捷键" FontSize="16.5" FontWeight="SemiBold" Margin="0,0,0,6" />
-                            <TextBlock Text="点击下方输入框后直接按组合键。组合必须以 Ctrl / Shift / Alt 开头，不支持 Win 键。"
+                            <TextBlock Text="在下方输入自定义组合键。以 Ctrl / Shift / Alt 开头，不支持 Win 键。"
                                        FontSize="12.5" Foreground="{StaticResource TextSecondary}"
                                        TextWrapping="Wrap" Margin="0,0,0,6" />
 
-                            <TextBlock Text="显示 / 隐藏主界面" FontSize="13.5"
-                                       Foreground="{StaticResource TextSecondary}" Margin="0,4,0,4" />
+                            <CheckBox x:Name="ChkHotkeyMainEnabled" Content="显示 / 隐藏主界面"
+                                      Margin="0,4,0,4" VerticalAlignment="Center"
+                                      Checked="HotkeyEnabled_Changed"
+                                      Unchecked="HotkeyEnabled_Changed" />
                             <StackPanel Orientation="Horizontal">
                                 <TextBox x:Name="HotkeyMainBox" Style="{StaticResource Input}" Width="220"
                                          AutomationProperties.Name="主界面快捷键"
@@ -799,8 +866,10 @@
                                 </Button>
                             </StackPanel>
 
-                            <TextBlock Text="cooopy 到剪贴板（弹窗填入剪贴板内容）" FontSize="13.5"
-                                       Foreground="{StaticResource TextSecondary}" Margin="0,12,0,4" />
+                            <CheckBox x:Name="ChkHotkeySaveEnabled" Content="cooopy剪贴板指令"
+                                      Margin="0,12,0,4" VerticalAlignment="Center"
+                                      Checked="HotkeyEnabled_Changed"
+                                      Unchecked="HotkeyEnabled_Changed" />
                             <StackPanel Orientation="Horizontal">
                                 <TextBox x:Name="HotkeySaveBox" Style="{StaticResource Input}" Width="220"
                                          AutomationProperties.Name="快速打标快捷键"
@@ -820,19 +889,19 @@
                     </Border>
 
                     <!-- data -->
-                    <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,14">
+                    <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,9">
                         <StackPanel>
                             <TextBlock Text="数据" FontSize="16.5" FontWeight="SemiBold" Margin="0,0,0,4" />
 
                             <TextBlock Text="单条最大长度（字符）" FontSize="13.5"
                                        Foreground="{StaticResource TextSecondary}" Margin="0,4,0,4" />
-                            <TextBox x:Name="MaxLengthBox" Style="{StaticResource Input}" Width="150"
+                            <TextBox x:Name="MaxLengthBox" Style="{StaticResource Input}" Width="220"
                                      HorizontalAlignment="Left"
                                      AutomationProperties.Name="最大长度" TextChanged="MaxLengthBox_TextChanged" />
 
                             <TextBlock Text="重复内容去重" FontSize="13.5"
                                        Foreground="{StaticResource TextSecondary}" Margin="0,12,0,4" />
-                            <ComboBox x:Name="DedupeCombo" Width="160" HorizontalAlignment="Left"
+                            <ComboBox x:Name="DedupeCombo" Width="220" HorizontalAlignment="Left"
                                       SelectionChanged="SettingsChanged_SelectionChanged">
                                 <ComboBoxItem Content="关闭" Tag="0" />
                                 <ComboBoxItem Content="5 分钟内" Tag="5" />
@@ -877,9 +946,9 @@
                     </Border>
 
                     <!-- DeepSeek AI -->
-                    <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,14">
+                    <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,9">
                         <StackPanel>
-                            <TextBlock Text="DeepSeek AI（高级）" FontSize="16.5" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <TextBlock Text="AI识别导入（需配置DEEPSEEK API）" FontSize="16.5" FontWeight="SemiBold" Margin="0,0,0,6" />
                             <TextBlock Text="API 地址" FontSize="13" Foreground="{StaticResource TextSecondary}" Margin="0,2,0,4" />
                             <TextBox x:Name="ApiUrlBox" Style="{StaticResource Input}" FontSize="14"
                                      TextChanged="SettingsChanged_Click" />
@@ -887,13 +956,13 @@
                             <TextBox x:Name="ApiKeyBox" Style="{StaticResource Input}" FontSize="14"
                                      TextChanged="SettingsChanged_Click" />
                             <TextBlock Text="模型" FontSize="13" Foreground="{StaticResource TextSecondary}" Margin="0,10,0,4" />
-                            <TextBox x:Name="ModelBox" Style="{StaticResource Input}" FontSize="14" Width="260"
+                            <TextBox x:Name="ModelBox" Style="{StaticResource Input}" FontSize="14" Width="220"
                                      HorizontalAlignment="Left" TextChanged="SettingsChanged_Click" />
 
                             <Border x:Name="AdvancedEnableBox" CornerRadius="8" Padding="8,6"
                                     Margin="0,12,0,0" Background="Transparent"
                                     BorderBrush="Transparent" BorderThickness="0">
-                                <CheckBox x:Name="ChkAdvancedEnabled" Content="启用 AI 智能识别"
+                                <CheckBox x:Name="ChkAdvancedEnabled" Content="启用 AI 识别导入"
                                           Checked="SettingsChanged_Click" Unchecked="SettingsChanged_Click" />
                             </Border>
                             <TextBlock x:Name="AdvancedReasonText" FontSize="13" Foreground="#B45309"

@@ -2,9 +2,14 @@ using System.Runtime.InteropServices;
 
 namespace Cooopy.Services
 {
+    public static class NativeSelDiagnostics
+    {
+        public static Action<string> AppLog;
+    }
     public static class Native
     {
         public const int WH_KEYBOARD_LL = 13;
+        public const int WH_MOUSE_LL = 14;
 
         public const int WM_KEYDOWN = 0x0100;
         public const int WM_KEYUP = 0x0101;
@@ -15,6 +20,7 @@ namespace Cooopy.Services
         public const int WM_LBUTTONDOWN = 0x0201;
         public const int WM_LBUTTONUP = 0x0202;
         public const int WM_LBUTTONDBLCLK = 0x0203;
+        public const int WM_RBUTTONDOWN = 0x0204;
         public const int WM_HOTKEY = 0x0312;
         public const int WM_CLIPBOARDUPDATE = 0x031D;
 
@@ -22,6 +28,15 @@ namespace Cooopy.Services
         public const uint MOD_CONTROL = 0x0002;
         public const uint MOD_SHIFT = 0x0004;
         public const uint MOD_NOREPEAT = 0x4000;
+
+        public const uint INPUT_KEYBOARD = 1;
+        public const uint KEYEVENTF_KEYUP = 0x0002;
+
+        public const int VK_SHIFT = 0x10;
+        public const int VK_CONTROL = 0x11;
+        public const int VK_MENU = 0x12;
+        public const int VK_LWIN = 0x5B;
+        public const int VK_RWIN = 0x5C;
 
         public const int GWL_EXSTYLE = -20;
         public const int WS_EX_NOACTIVATE = 0x08000000;
@@ -79,6 +94,128 @@ namespace Cooopy.Services
 
         public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
+        // ---- 按键合成（快捷键取词用） ----
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MOUSEINPUT
+        {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KEYBDINPUT
+        {
+            public ushort wVk;
+            public ushort wScan;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        public struct INPUTUNION
+        {
+            [FieldOffset(0)] public MOUSEINPUT mi;
+            [FieldOffset(0)] public KEYBDINPUT ki;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct INPUT
+        {
+            public uint type;
+            public INPUTUNION u;
+        }
+
+        [DllImport("user32.dll")]
+        public static extern short GetAsyncKeyState(int vKey);
+
+        public static bool IsKeyDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+
+        /// <summary>合成一次 Ctrl+C（按下→抬起）。事件之间留出间隔——
+        /// 零间隔打包的按键事件会被部分程序的状态机忽略。</summary>
+        public static uint SendCtrlC()
+        {
+            var one = new INPUT[1];
+            one[0] = KeyInput(0x11, false); // Ctrl down
+            SendInput(1, one, Marshal.SizeOf<INPUT>());
+            System.Threading.Thread.Sleep(20);
+            one[0] = KeyInput(0x43, false); // C down
+            SendInput(1, one, Marshal.SizeOf<INPUT>());
+            System.Threading.Thread.Sleep(20);
+            one[0] = KeyInput(0x43, true);  // C up
+            SendInput(1, one, Marshal.SizeOf<INPUT>());
+            System.Threading.Thread.Sleep(20);
+            one[0] = KeyInput(0x11, true);  // Ctrl up
+            return SendInput(1, one, Marshal.SizeOf<INPUT>());
+        }
+
+        /// <summary>
+        /// 把用户还按着的修饰键注入“松开”事件。快捷键（如 Alt+D）触发时用户往往仍按着
+        /// 修饰键，此时合成 Ctrl+C 会让目标程序收到 Ctrl+Alt+C——什么都复制不到。
+        /// 先替用户松开，再合成，才能得到干净的 Ctrl+C。
+        /// </summary>
+        public static void ReleaseHeldModifiers(out int released)
+        {
+            // 已弃用：物理按着的修饰键无法用注入“松开”——系统底层仍认为按下，
+            // 后续合成会被加上的 Alt 修饰弄坏。改用 WM_COPY 直发方案。
+            released = 0;
+        }
+
+        public const int WM_COPY = 0x0301;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct GUITHREADINFO
+        {
+            public int cbSize;
+            public uint flags;
+            public IntPtr hwndActive;
+            public IntPtr hwndFocus;
+            public IntPtr hwndCapture;
+            public IntPtr hwndMenuOwner;
+            public IntPtr hwndMoveSize;
+            public IntPtr hwndCaret;
+            public RECT rcCaret;
+        }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO info);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        /// <summary>让前台线程的键盘焦点控件执行复制（WM_COPY）。
+        /// 对标准编辑控件和多数现代程序有效；不走键盘模拟，不受按着的修饰键影响。</summary>
+        public static bool CopyFromFocusedWindow()
+        {
+            var info = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
+            if (!GetGUIThreadInfo(0, ref info)) return false;
+            if (info.hwndFocus == IntPtr.Zero) return false;
+            SendMessage(info.hwndFocus, WM_COPY, IntPtr.Zero, IntPtr.Zero);
+            return true;
+        }
+
+        private static INPUT KeyInput(ushort vk, bool keyUp) => new()
+        {
+            type = INPUT_KEYBOARD,
+            u = new INPUTUNION
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = vk,
+                    wScan = 0,
+                    dwFlags = keyUp ? KEYEVENTF_KEYUP : 0,
+                    time = 0,
+                    dwExtraInfo = IntPtr.Zero
+                }
+            }
+        };
+
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
 
@@ -110,6 +247,19 @@ namespace Cooopy.Services
 
         [DllImport("user32.dll")]
         public static extern uint GetClipboardSequenceNumber();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern uint RegisterWindowMessage(string lpString);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindow(IntPtr hWnd);
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();

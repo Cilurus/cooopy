@@ -13,6 +13,15 @@ namespace Cooopy.Services
 
         public void Attach(IntPtr hwnd) => _hwnd = hwnd;
 
+        /// <summary>注销某个快捷键，不影响另一个。</summary>
+        public void Disable(int id)
+        {
+            if (_hwnd == IntPtr.Zero) return;
+            if (!_active.ContainsKey(id)) return;
+            Native.UnregisterHotKey(_hwnd, id);
+            _active.Remove(id);
+        }
+
         public void Detach()
         {
             if (_hwnd != IntPtr.Zero)

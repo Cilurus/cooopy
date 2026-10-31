@@ -7,10 +7,12 @@
         Background="Transparent"
         ShowInTaskbar="False"
         Topmost="True"
+        ShowActivated="False"
         ResizeMode="NoResize"
         SizeToContent="WidthAndHeight"
         FontFamily="{StaticResource UiFont}"
         SourceInitialized="Window_SourceInitialized"
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
         Deactivated="Window_Deactivated">
 
     <Grid Margin="14">

@@ -626,12 +626,17 @@
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="FontSize" Value="14.5" />
+        <!-- 与标题栏右侧窗口按钮同规格：38x28、圆角 6、间距 2 -->
+        <Setter Property="Width" Value="38" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Margin" Value="2,0,0,0" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="Bd" Background="Transparent" CornerRadius="7"
-                            Padding="7,5" Margin="0,0,2,0">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="6"
+                            Padding="0">
                         <ContentPresenter Content="{TemplateBinding Content}"
+                                          HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
                                           TextElement.FontWeight="{TemplateBinding FontWeight}"
@@ -784,6 +789,9 @@
     <!-- ============ default (built-in) tag: small ball, same height as a tag chip ============ -->
     <!-- 置顶符号：横线上方一个向上的箭头 -->
     <Geometry x:Key="PinGlyph">M 4.5,4.5 H 19.5 M 12,20 V 8 M 7.5,12.5 L 12,8 L 16.5,12.5</Geometry>
+    <!-- 大头针（主界面置顶按钮用）：Lucide pin 轮廓，竖版，用时旋转 45° 呈斜置 -->
+    <Geometry x:Key="PushpinGlyph">M 12,17 V 22 M 9,10.76 A 2,2 0 0 1 7.89,12.55 L 6.11,13.45 A 2,2 0 0 0 5,15.24 V 16 A 1,1 0 0 0 6,17 H 18 A 1,1 0 0 0 19,16 V 15.24 A 2,2 0 0 0 17.89,13.45 L 16.11,12.55 A 2,2 0 0 1 15,10.76 V 6 H 16 A 2,2 0 0 0 16,2 H 8 A 2,2 0 0 0 8,6 H 9 Z</Geometry>
+    <Geometry x:Key="EyeOffGlyph">M 3,12 C 6.5,7.2 17.5,7.2 21,12 C 17.5,16.8 6.5,16.8 3,12 Z M 9.9,12 A 2.1,2.1 0 1 1 14.1,12 A 2.1,2.1 0 1 1 9.9,12 M 4.6,19.4 L 19.4,4.6</Geometry>
 
     <Style x:Key="DefaultTagCheckBox" TargetType="CheckBox">
         <Setter Property="Cursor" Value="Hand" />
@@ -810,6 +818,17 @@
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   StrokeLineJoin="Round" />
                         </Grid>
+                        <!-- 私密：小球里画一只被划掉的眼睛 -->
+                        <Grid x:Name="PrivateRoot" Visibility="Collapsed">
+                            <Ellipse x:Name="PrivateRing" Fill="{StaticResource Surface}"
+                                     Stroke="{Binding DotBrush}" StrokeThickness="1.2" />
+                            <Path x:Name="PrivateIcon" Data="{StaticResource EyeOffGlyph}"
+                                  Stroke="{Binding DotBrush}" StrokeThickness="1.4" Fill="Transparent"
+                                  Width="14" Height="14" Stretch="Uniform"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round" />
+                        </Grid>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <DataTrigger Binding="{Binding Kind}" Value="urgency">
@@ -818,12 +837,19 @@
                         <DataTrigger Binding="{Binding Kind}" Value="pin">
                             <Setter TargetName="PinRoot" Property="Visibility" Value="Visible" />
                         </DataTrigger>
+                        <DataTrigger Binding="{Binding Kind}" Value="private">
+                            <Setter TargetName="PrivateRoot" Property="Visibility" Value="Visible" />
+                        </DataTrigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="UrgencyRing" Property="Visibility" Value="Collapsed" />
                             <Setter TargetName="UrgencySolid" Property="Visibility" Value="Visible" />
                             <Setter TargetName="PinRing" Property="Fill" Value="{StaticResource Accent}" />
                             <Setter TargetName="PinRing" Property="Stroke" Value="{StaticResource Accent}" />
                             <Setter TargetName="PinIcon" Property="Stroke" Value="White" />
+                            <!-- 私密选中后的配色与置顶一致：Accent 实心 + 白色图标 -->
+                            <Setter TargetName="PrivateRing" Property="Fill" Value="{StaticResource Accent}" />
+                            <Setter TargetName="PrivateRing" Property="Stroke" Value="{StaticResource Accent}" />
+                            <Setter TargetName="PrivateIcon" Property="Stroke" Value="White" />
                         </Trigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
@@ -832,6 +858,7 @@
                             </MultiTrigger.Conditions>
                             <Setter TargetName="UrgencyRing" Property="Fill" Value="{StaticResource SurfaceAlt}" />
                             <Setter TargetName="PinRing" Property="Fill" Value="{StaticResource SurfaceAlt}" />
+                            <Setter TargetName="PrivateRing" Property="Fill" Value="{StaticResource SurfaceAlt}" />
                         </MultiTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

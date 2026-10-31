@@ -63,6 +63,19 @@ namespace Cooopy.Services
             _icon.DoubleClick += (_, _) => ShowMainRequested?.Invoke();
         }
 
+        /// <summary>Explorer 重启导致任务栏重建后，重新显示托盘图标。</summary>
+        public void EnsureVisible()
+        {
+            try
+            {
+                if (!_icon.Visible) _icon.Visible = true;
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+
         public void SetPaused(bool paused)
         {
             _pauseItem.Text = paused ? "恢复记录" : "暂停记录 30 分钟";

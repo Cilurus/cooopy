@@ -28,7 +28,8 @@ namespace Cooopy.Services
         {
             try
             {
-                using var key = Registry.CurrentUser.OpenSubKey(RunKey, true);
+                // CreateSubKey：Run 键不存在（极少数精简系统）时创建，避免静默失败。
+                using var key = Registry.CurrentUser.CreateSubKey(RunKey, true);
                 if (key == null) return;
                 if (enabled)
                 {
