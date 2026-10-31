@@ -626,8 +626,8 @@
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="FontSize" Value="14.5" />
-        <!-- 与标题栏右侧窗口按钮同规格：38x28、圆角 6、间距 2 -->
-        <Setter Property="Width" Value="38" />
+        <!-- 与标题栏右侧窗口按钮同规格：34x28、圆角 6、间距 2 -->
+        <Setter Property="Width" Value="34" />
         <Setter Property="Height" Value="28" />
         <Setter Property="Margin" Value="2,0,0,0" />
         <Setter Property="Template">
@@ -661,7 +661,7 @@
         </Setter>
     </Style>
     <Style x:Key="WindowButton" TargetType="Button">
-        <Setter Property="Width" Value="38" />
+        <Setter Property="Width" Value="34" />
         <Setter Property="Height" Value="28" />
         <Setter Property="Margin" Value="2,0,0,0" />
         <Setter Property="Background" Value="Transparent" />
@@ -789,6 +789,8 @@
     <!-- ============ default (built-in) tag: small ball, same height as a tag chip ============ -->
     <!-- 置顶符号：横线上方一个向上的箭头 -->
     <Geometry x:Key="PinGlyph">M 4.5,4.5 H 19.5 M 12,20 V 8 M 7.5,12.5 L 12,8 L 16.5,12.5</Geometry>
+    <!-- 导入图标（AI 识别导入页签）：开口方托盘 + 落入的下行箭头 -->
+    <Geometry x:Key="ImportGlyph">M 4.5,12.5 V 18 A 2.2,2.2 0 0 0 6.7,20.2 H 17.3 A 2.2,2.2 0 0 0 19.5,18 V 12.5 M 12,3.2 V 13.2 M 8.7,9.9 L 12,13.2 L 15.3,9.9</Geometry>
     <!-- 大头针（主界面置顶按钮用）：Lucide pin 轮廓，竖版，用时旋转 45° 呈斜置 -->
     <Geometry x:Key="PushpinGlyph">M 12,17 V 22 M 9,10.76 A 2,2 0 0 1 7.89,12.55 L 6.11,13.45 A 2,2 0 0 0 5,15.24 V 16 A 1,1 0 0 0 6,17 H 18 A 1,1 0 0 0 19,16 V 15.24 A 2,2 0 0 0 17.89,13.45 L 16.11,12.55 A 2,2 0 0 1 15,10.76 V 6 H 16 A 2,2 0 0 0 16,2 H 8 A 2,2 0 0 0 8,6 H 9 Z</Geometry>
     <Geometry x:Key="EyeOffGlyph">M 3,12 C 6.5,7.2 17.5,7.2 21,12 C 17.5,16.8 6.5,16.8 3,12 Z M 9.9,12 A 2.1,2.1 0 1 1 14.1,12 A 2.1,2.1 0 1 1 9.9,12 M 4.6,19.4 L 19.4,4.6</Geometry>

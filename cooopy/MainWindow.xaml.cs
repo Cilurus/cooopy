@@ -1109,15 +1109,16 @@ namespace Cooopy
             var tabStyle = (Style)FindResource(bubble ? "TopTabIcon" : "TopTab");
             if (NavRecords != null) NavRecords.Style = tabStyle;
             if (NavTags != null) NavTags.Style = tabStyle;
+            if (NavAdvanced != null) NavAdvanced.Style = tabStyle;
             if (NavSettings != null) NavSettings.Style = tabStyle;
             // AppLogo keeps the same X position in both modes (margin is set once in XAML).
 
             // Bubble mode uses icon-only top tabs: note / tag / gear.
             var iconVisibility = bubble ? Visibility.Visible : Visibility.Collapsed;
             var textVisibility = bubble ? Visibility.Collapsed : Visibility.Visible;
-            foreach (var icon in new[] { NavRecordsIcon, NavTagsIcon, NavSettingsIcon })
+            foreach (var icon in new[] { NavRecordsIcon, NavTagsIcon, NavSettingsIcon, NavAdvancedIcon })
                 if (icon != null) icon.Visibility = iconVisibility;
-            foreach (var text in new[] { NavRecordsText, NavTagsText, NavSettingsText })
+            foreach (var text in new[] { NavRecordsText, NavTagsText, NavSettingsText, NavAdvancedText })
                 if (text != null) text.Visibility = textVisibility;
         }
 
