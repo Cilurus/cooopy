@@ -10,7 +10,7 @@
     <ApplicationIcon>cooopy.ico</ApplicationIcon>
     <AssemblyName>cooopy</AssemblyName>
     <RootNamespace>Cooopy</RootNamespace>
-    <Version>0.1.1</Version>
+    <Version>0.2.0</Version>
     <Authors>cooopy</Authors>
     <Product>cooopy</Product>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
